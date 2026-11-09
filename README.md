@@ -209,6 +209,21 @@ flowchart TD
 
 ---
 
+## 可选：跨端 MCP 桥（`mcp/agent-bridge`）
+
+前面五层管的是「本机这个 Agent 怎么做事」。如果你还想让 Antigravity 把活派给**另一个** CLI Agent（DSH / Codex / 其它一次性任务 CLI），`mcp/agent-bridge/` 提供了一个零依赖的 MCP stdio 桥。
+
+- **形态**：单文件约 400 行，只用 Node 内建模块，**不含任何第三方项目的代码**。
+- **后端可插拔**：`BRIDGE_CMD` + `BRIDGE_ARGS` 指向谁就是谁，桥本身不认识 DSH 也不认识 Codex，任务经 stdin 送入，答案从 stdout 的 NDJSON 事件流里取最后一条有效事件。
+- **工具**：`agent_ask` / `agent_sessions` / `agent_status` / `agent_forget`。
+- **自检**：`node mcp/agent-bridge/verify.mjs` —— 用假后端跑 32 项协议断言，不联网、不需要真 CLI，任何机器结果一致。
+
+环境变量表、Antigravity 注册样例、三档后端配法与已知限制见 [`mcp/agent-bridge/README.md`](./mcp/agent-bridge/README.md)。
+
+> 如果你要的是开箱即用：直接用 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew)（MIT，DSH 插件 + 独立 MCP server，自带 `node src/install/cli.mjs agy` 安装器）或 [`tianshu-mcp`](https://github.com/lanlan0811/tianshu-mcp)（Apache-2.0，`npx -y tianshu-mcp`）即可，功能面比本桥宽得多。本桥只服务「想完全掌控、后端随便换、代码能一眼读完」这一种需求。
+
+---
+
 ## 适配的模型版本
 
 - 已在本机实测验证的模型（`VERIFIED`）：

@@ -209,16 +209,17 @@ flowchart TD
 
 ---
 
-## 可选：跨端 MCP 桥（`mcp/agent-bridge`）
+## 可选：跨端 MCP 桥（`mcp/dsh-crew`）
 
-前面五层管的是「本机这个 Agent 怎么做事」。如果你还想让 Antigravity 把活派给**另一个** CLI Agent（DSH / Codex / 其它一次性任务 CLI），`mcp/agent-bridge/` 提供了一个零依赖的 MCP stdio 桥。
+前面几层管的是「本机这个 Agent 怎么做事」。如果你还想让 Antigravity 把活派给**另一个** Agent（这里是 DSH / DeepSeek Harness），`mcp/dsh-crew/` 提供了一个零依赖的 MCP stdio 桥。
 
-- **形态**：单文件约 500 行，只用 Node 内建模块，**不含任何第三方项目的代码**。
-- **后端可插拔**：`BRIDGE_CMD` + `BRIDGE_ARGS` 指向谁就是谁，桥本身不认识 DSH 也不认识 Codex，任务经 stdin 送入，答案从 stdout 的 NDJSON 事件流里取最后一条有效事件。
-- **工具**：`agent_ask` / `agent_sessions` / `agent_status` / `agent_forget`。
-- **自检**：`node mcp/agent-bridge/verify.mjs` —— 用假后端跑 32 项协议断言，不联网、不需要真 CLI，任何机器结果一致。
+- **形态**：单文件约 470 行，只用 Node 内建模块，不装 MCP SDK，**不含任何第三方项目的代码**。
+- **后端**：走 `dsh --profile headless`。任务经 stdin 送入（避开引号/换行/中文标点的二次转义），答案取 NDJSON 事件流里最后的 `final` 事件；`--session-id` 支持同一标签续聊。
+- **工具**：`dsh_ask` / `dsh_sessions` / `dsh_status` / `dsh_forget`。
+- **自检**：`node mcp/dsh-crew/verify.mjs --offline` —— 只验协议与自检，不启动 DSH、不花 token；去掉 `--offline` 则真跑两轮并验证续聊。
+- **来历透明**：不是从开源项目复制的，由 DSH 自身按需求生成、会话可溯；设计形态参照作者另一座自用桥。来龙去脉写在其 README 第 1 节。
 
-环境变量表、Antigravity 注册样例、三档后端配法与已知限制见 [`mcp/agent-bridge/README.md`](./mcp/agent-bridge/README.md)。
+环境变量表、Antigravity 注册样例、凭据补丁的占位机制与已知限制见 [`mcp/dsh-crew/README.md`](./mcp/dsh-crew/README.md)。
 
 ---
 

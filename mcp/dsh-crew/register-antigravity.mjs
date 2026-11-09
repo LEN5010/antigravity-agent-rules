@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+/**
+ * 把 dsh-crew 注册进 Antigravity 的全局 MCP 配置（改前自动备份）。
+ *
+ * 用法：
+ *   node register-antigravity.mjs                 # 不设工作区，交给宿主 cwd
+ *   node register-antigravity.mjs "D:/my/project" # 指定 DSH 工作区
+ *
+ * 所有路径都从本脚本位置和 os.homedir() 推出来，不写死任何本机路径。
+ */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const CONFIG = path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
+const BACKUP_DIR = path.join(HERE, 'backups');
+const ENTRY = {
+  command: process.execPath,
+  args: [path.join(HERE, 'dsh-crew.mjs'), 'mcp'],
+};
+
+const workspace = process.argv[2];
+if (workspace) ENTRY.env = { DSH_CREW_WORKSPACE: workspace };
+
+if (!fs.existsSync(CONFIG)) {
+  console.error('未找到 Antigravity MCP 配置：' + CONFIG);
+  console.error('先启动一次 Antigravity，或手动创建 {"mcpServers":{}} 后重试。');
+  process.exit(1);
+}
+
+const raw = fs.readFileSync(CONFIG, 'utf8');
+const cfg = raw.trim() ? JSON.parse(raw) : {};
+cfg.mcpServers = cfg.mcpServers || {};
+
+const ts = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+fs.mkdirSync(BACKUP_DIR, { recursive: true });
+const backup = path.join(BACKUP_DIR, 'antigravity-mcp-config-' + ts + '.bak');
+fs.writeFileSync(backup, raw, 'utf8');
+
+cfg.mcpServers['dsh-crew'] = ENTRY;
+const next = JSON.stringify(cfg, null, 2) + '\n';
+fs.writeFileSync(CONFIG, next, 'utf8');
+
+// 回读校验
+const check = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
+console.log('CONFIG: ' + CONFIG);
+console.log('BACKUP: ' + backup);
+console.log('SERVERS: ' + Object.keys(check.mcpServers).join(', '));
+console.log('DSH_CREW_ENTRY: ' + JSON.stringify(check.mcpServers['dsh-crew']));
+console.log('提示：重启 Antigravity 或新开对话后，MCP 面板才会出现 dsh-crew。');

@@ -1,0 +1,7 @@
+# 桥自己维护的运行态，不进版本库
+state/
+backups/
+
+# 依赖 / 临时产物
+node_modules/
+*.log

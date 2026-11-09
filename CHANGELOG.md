@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.0] - 2026-11-09
+
+- 新增跨端 MCP 双桥（`mcp/`）：
+  - `mcp/dsh-crew`：绑定 DSH（`dsh --profile headless`）的单文件零依赖 MCP stdio 桥，提供 `dsh_ask` / `dsh_sessions` / `dsh_status` / `dsh_forget`，通过 `verify.mjs` 6/6 真机验证（含 `--offline` 5/5 离线协议自检与同一 `session` 续聊复用）。
+  - `mcp/agent-bridge`：零依赖可插拔通用 CLI MCP stdio 桥（后端由 `BRIDGE_CMD` / `BRIDGE_ARGS` 指定），提供 `agent_ask` / `agent_sessions` / `agent_status` / `agent_forget`，含假后端 32/32 协议断言自检（标注未接真实后端，与 `dsh-crew` 明确区分验证状态）。
+- 更新 `skills/multi-agent-orchestrator/SKILL.md`：将 §4 中的 `<YOUR_HEADLESS_MCP>` 占位符对接至仓库内置的 `mcp/dsh-crew` 与 `mcp/agent-bridge` 双桥对照表；并在 `skills/chinese-novelist/SKILL.md` 与 `skills/safe-network-diagnostics/SKILL.md` 中补充 `BidiGenerateContent` 流式整包缓冲下的分块 `write_file`（单次 ≤1,500–2,000 字 + `Append: true`）规则与假性流中断鉴别说明。
+- 补充 `skills/chinese-novelist/SKILL.md` 及 `UPSTREAM.md` 的上游开源归属说明（`PenglongHuang/chinese-novelist-skill`，MIT License），优化 `README.md` 开头「Antigravity 桌面端（IDE / 2.0）& agy CLI」跨端定位说明并新增底部「可选：跨端 MCP 桥（`mcp/`）」章节。
+
 ## [v1.0.2] - 2026-11-09
 
 - `install.ps1` 新增 `-HookOnly`：只合并 `hooks.json` 并部署 `scripts/`，不改 `GEMINI.md`、`config.json` 和规则/Skill/文风层，自检照常运行。

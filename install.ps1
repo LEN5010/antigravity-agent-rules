@@ -17,13 +17,19 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Force
 #   pwsh -NoProfile -File .\install.ps1 -WorkspacePath "D:\MyProject"
+#   powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -HookOnly
+#
+# -HookOnly installs only the PreToolUse/PostToolUse hook layer (hooks.json
+# merge + scripts/). GEMINI.md, config.json, rules, skills, agents and tone
+# plugins are left untouched.
 # ============================================================================
 
 param(
     [string]$TargetHome = $env:USERPROFILE,
     [string]$WorkspacePath = "",
     [switch]$Force,
-    [switch]$SkipHookVerify
+    [switch]$SkipHookVerify,
+    [switch]$HookOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +67,9 @@ Write-Host "  Source Repo : $RepoRoot"
 Write-Host "  Target Home : $TargetHome ($ForwardHome)"
 if (-not [string]::IsNullOrWhiteSpace($ForwardWs)) {
     Write-Host "  Workspace   : $WorkspacePath ($ForwardWs)"
+}
+if ($HookOnly) {
+    Write-Host "  Mode        : HOOK ONLY (hooks.json + scripts/; rules/skills/tone skipped)"
 }
 Write-Host "======================================================================"
 
@@ -123,6 +132,10 @@ $ManagedTargets = @(
     @{ Rel = 'antigravity\skills\chinese-novelist';       Mode = 'OVERWRITE' }
 )
 
+if ($HookOnly) {
+    $ManagedTargets = @($ManagedTargets | Where-Object { $_.Rel -like 'config\hooks.json' -or $_.Rel -like 'config\scripts\*' })
+}
+
 $ExistingItems = @()
 foreach ($item in $ManagedTargets) {
     $full = Join-Path $GeminiDir $item.Rel
@@ -172,6 +185,7 @@ $manifestObj = [ordered]@{
     timestamp     = $stamp
     targetHome    = $TargetHome
     workspacePath = $WorkspacePath
+    mode          = $(if ($HookOnly) { 'hook-only' } else { 'full' })
     preExisting   = @($ExistingItems | ForEach-Object { $_.Rel })
 }
 $manifestJson = $manifestObj | ConvertTo-Json -Depth 5
@@ -240,6 +254,10 @@ Copy-TreeWithReplacement `
     -DstDir $ScriptsDir
 
 Write-Host "[2/5] Merged hooks.json (top-level keys) & deployed scripts/."
+
+if ($HookOnly) {
+    Write-Host "[3-5/5] Skipped (-HookOnly): GEMINI.md, config.json, rules/, skills/, agents/, tone/ untouched."
+} else {
 
 # ----------------------------------------------------------------------------
 # 4. Deploy Layer 2 & 3: merge GEMINI.md & deploy global/ + rules/
@@ -377,6 +395,7 @@ foreach ($pName in $PluginNames) {
 $jsonOut = $cfgObj | ConvertTo-Json -Depth 20
 [System.IO.File]::WriteAllText($ConfigJsonPath, ($jsonOut + "`r`n"), $Utf8NoBom)
 Write-Host "[5/5] Enabled 5 plugins in: $ConfigJsonPath"
+}
 
 # ----------------------------------------------------------------------------
 # Optional: Run verify-hook.py self-test
@@ -399,4 +418,8 @@ if (-not $SkipHookVerify) {
 }
 
 Write-Host ""
-Write-Host "SUCCESS: Antigravity Agent Rules installed and verified."
+if ($HookOnly) {
+    Write-Host "SUCCESS: Antigravity Agent Rules hook layer installed (hook-only mode)."
+} else {
+    Write-Host "SUCCESS: Antigravity Agent Rules installed and verified."
+}

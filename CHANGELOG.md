@@ -1,5 +1,10 @@
 # Changelog
 
+## [v1.0.2] - 2026-11-09
+
+- `install.ps1` 新增 `-HookOnly`：只合并 `hooks.json` 并部署 `scripts/`，不改 `GEMINI.md`、`config.json` 和规则/Skill/文风层，自检照常运行。
+- 备份 `manifest.json` 新增 `mode` 字段（`full` / `hook-only`）；`uninstall.ps1` 遇到 `hook-only` 时只还原 Hook 相关文件，不删用户自己的 `GEMINI.md` 与插件，也不改 `config.json`。
+
 ## [v1.0.1] - 2026-11-09
 
 - 重写 README：开头讲清痛点与四条使用边界（仅支持 Windows、黑名单是安全网而非沙箱、Ask-First 下默认 allow 的注意事项、不要全量常驻），文件总表与手动部署步骤收进折叠块。

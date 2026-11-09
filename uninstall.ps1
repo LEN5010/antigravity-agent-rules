@@ -51,6 +51,18 @@ if ($BackupDirs.Count -eq 0) {
 $LatestBackup   = $BackupDirs[0].FullName
 $ConfigJsonPath = Join-Path $ConfigDir 'config.json'
 
+# Read install mode from the backup manifest (hook-only installs never touched config.json)
+$InstallMode  = 'full'
+$ManifestPath = Join-Path $LatestBackup 'manifest.json'
+if (Test-Path -LiteralPath $ManifestPath) {
+    try {
+        $mf = [System.IO.File]::ReadAllText($ManifestPath, $Utf8NoBom) | ConvertFrom-Json
+        if ($null -ne $mf.PSObject.Properties['mode'] -and $mf.mode -eq 'hook-only') {
+            $InstallMode = 'hook-only'
+        }
+    } catch { }
+}
+
 # Pre-parse config.json before modifying anything
 $cfgObj = $null
 if (Test-Path -LiteralPath $ConfigJsonPath) {
@@ -83,6 +95,11 @@ $ManagedRelPaths = @(
     'antigravity\skills\chinese-novelist'
 )
 
+if ($InstallMode -eq 'hook-only') {
+    # Hook-only installs touched only hooks.json and scripts/; never delete the user's own GEMINI.md or plugins
+    $ManagedRelPaths = @($ManagedRelPaths | Where-Object { $_ -like 'config\hooks.json' -or $_ -like 'config\scripts\*' })
+}
+
 $ToRestore = @()
 $ToDelete  = @()
 
@@ -109,7 +126,7 @@ foreach ($r in $ToRestore) {
 foreach ($d in $ToDelete) {
     Write-Host ("  [DELETE (new item)]   {0}" -f $d.Live)
 }
-if (Test-Path -LiteralPath $ConfigJsonPath) {
+if ($InstallMode -ne 'hook-only' -and (Test-Path -LiteralPath $ConfigJsonPath)) {
     Write-Host ("  [CLEANUP 5 plugins]   {0}" -f $ConfigJsonPath)
 }
 
@@ -150,7 +167,7 @@ $PluginNames = @(
     'humanizer-zh'
 )
 
-if ($null -ne $cfgObj -and $null -ne $cfgObj.PSObject.Properties['plugins']) {
+if ($InstallMode -ne 'hook-only' -and $null -ne $cfgObj -and $null -ne $cfgObj.PSObject.Properties['plugins']) {
     foreach ($pName in $PluginNames) {
         if ($null -ne $cfgObj.plugins.PSObject.Properties[$pName]) {
             $cfgObj.plugins.PSObject.Properties.Remove($pName)

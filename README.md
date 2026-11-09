@@ -25,6 +25,9 @@
 # 一键安装并自动跑完 40 项 Hook 自检（自动化环境跳过确认可加 -Force）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
 
+# 只装 Hook（防强删 + 代理/网络保护），不动 GEMINI.md、config.json 和规则/Skill/文风层
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -HookOnly
+
 # 一键卸载并还原到安装前状态（同样支持 -Force）
 powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
 ```
@@ -35,6 +38,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
 3. 备份：把安装前已存在的文件完整备份到 `~/.gemini/backup_antigravity_rules_<timestamp>/`，同时记录 `manifest.json`。
 4. 无损合并：合并 `GEMINI.md` 与 `hooks.json`，替换路径占位符，分发 5 层文件并在 `config.json` 中启用 5 个插件。
 5. 自检：自动运行 `python ~/.gemini/config/scripts/verify-hook.py` 验证 40 项断言全绿通过。
+
+只想要拦截功能、不想换掉自己的规则，就用 `-HookOnly`：只合并 `hooks.json` 并部署 `scripts/`，第 4 步里的 `GEMINI.md`、插件和 `config.json` 全部跳过，自检照常运行。卸载时 `uninstall.ps1` 会从备份的 `manifest.json` 认出这是只装 Hook 的安装，只还原 `hooks.json` 和 `scripts/`。
 
 <details>
 <summary>点击展开：无损合并与占位符替换细节</summary>

@@ -55,7 +55,7 @@
 |---|---|
 | `dsh_ask` | 派任务给 DSH。参数：`task`（必填）、`session`（标签，默认 `default`）、`cwd`（默认桥进程当前目录）、`permission`（`read-only` / `workspace-write` / `danger-full-access`，默认 `workspace-write`）、`approval_policy`（默认 `never`）、`timeout_ms`（默认 15 分钟，范围 10s–60min） |
 | `dsh_sessions` | 列出已保存的 crew 会话（标签 / session_id / cwd / 次数 / 上次是否成功） |
-| `dsh_status` | 自检后端：启动器、headless 参数支持（会执行一次 `dsh --profile headless --help`，不花 token）、asar（仅参考）、凭据补丁（自检前先落盘）、模型补丁是否启用、工作目录、状态文件位置 |
+| `dsh_status` | 自检后端：启动器、headless 参数支持（首次会执行一次 `dsh --profile headless --patch <凭据补丁> --help`，不花 token，成功后进程内缓存）、asar（仅参考）、凭据补丁（自检前先落盘）、模型补丁是否启用、工作目录、状态文件位置 |
 | `dsh_forget` | 忘记某个会话标签（只删映射，不动 DSH 会话数据） |
 
 返回文本固定含 `crew_session` / `session_id` / `cwd` / `permission` / `exit_code`；成功时附 `== DSH answer ==` 与 token 用量，失败时附 `== DSH error ==` 与 stderr 尾部。
@@ -66,7 +66,7 @@
 # 1) 确认 DSH 启动器能被找到（装法不同目录名不同，找不到就显式指定）
 export DSH_CREW_DSH_CMD="<DSH安装目录>/resources/runtime/cli/bin/dsh.cmd"   # Windows 桌面端
 # export DSH_CREW_DSH_CMD="/Applications/<产品名>.app/Contents/Resources/runtime/cli/bin/dsh"  # macOS 桌面端
-# 没装桌面端时也可以用 npm 版：npm i -g @deepseek-ai/dsh@0.2.2-rc.1（桥会在 PATH、/opt/homebrew/bin、/usr/local/bin 里找 dsh）
+# 没装桌面端时也可以用 npm 版：npm i -g @deepseek-ai/dsh@0.2.2-rc.1（桥会在 PATH、当前 node 目录、/opt/homebrew/bin、/usr/local/bin、~/.volta/bin 里找 dsh）
 
 # 2) 协议层自检，不启动 DSH、不花 token
 node verify.mjs --offline
@@ -94,7 +94,7 @@ node register-antigravity.mjs "D:/my/project"   # 参数可省略
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `DSH_CREW_DSH_CMD` | 自动探测 | DSH headless 启动器。先找桌面端：Windows `%LOCALAPPDATA%\Programs\*` 与 `C:\Program Files\*`，macOS `/Applications/*.app/Contents`，Linux `/opt/*`；再找 npm 全局安装的 `dsh`（PATH，非 Windows 另加 `/opt/homebrew/bin`、`/usr/local/bin`）。都找不到就必须显式给 |
+| `DSH_CREW_DSH_CMD` | 自动探测 | DSH headless 启动器。先找桌面端：Windows `%LOCALAPPDATA%\Programs\*` 与 `C:\Program Files\*`，macOS `/Applications/*.app/Contents` 与 `~/Applications/*.app/Contents`，Linux `/opt/*`；再找 npm 全局安装的 `dsh`（PATH、当前 node 所在目录，非 Windows 另加 `/opt/homebrew/bin`、`/usr/local/bin`、`~/.volta/bin`）。都找不到就必须显式给 |
 | `DSH_CREW_DSH_ASAR` | 由启动器反推 | 只在 `dsh_status` 里作参考信息，不影响运行，也不计入 `ready`（npm 安装没有 asar） |
 | `DSH_CREW_COMMANDCODE_PLUGIN` | `~/.dsh/profiles/desktop/node_modules/dsh-commandcode/index.js` | 该文件存在时才叠加 `crew-commandcode.patch.yml` |
 | `DSH_CREW_WORKSPACE` | 桥进程 cwd | `dsh_ask` 的默认工作目录 |

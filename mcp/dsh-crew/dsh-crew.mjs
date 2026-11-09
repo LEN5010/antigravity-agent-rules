@@ -33,13 +33,14 @@ const HOME = os.homedir();
 const IS_WIN = process.platform === 'win32';
 
 /**
- * 在 PATH 和常见全局安装目录里找 npm 全局安装的 dsh。
- * macOS 上从 Dock 启动的 GUI 客户端 PATH 往往不含 Homebrew 目录，所以额外补上两个常见位置。
+ * 在 PATH、当前 node 所在目录和常见全局安装目录里找 npm 全局安装的 dsh。
+ * macOS 上从 Dock 启动的 GUI 客户端 PATH 往往不含 Homebrew / nvm / fnm / Volta 目录，所以额外补齐。
  */
 function findDshOnPath() {
   const names = IS_WIN ? ['dsh.cmd'] : ['dsh'];
   const dirs = (process.env.PATH || process.env.Path || '').split(path.delimiter).filter(Boolean);
-  if (!IS_WIN) dirs.push('/opt/homebrew/bin', '/usr/local/bin');
+  dirs.push(path.dirname(process.execPath));
+  if (!IS_WIN) dirs.push('/opt/homebrew/bin', '/usr/local/bin', path.join(HOME, '.volta', 'bin'));
   for (const d of dirs) {
     for (const n of names) {
       const p = path.join(d, n);
@@ -52,7 +53,8 @@ function findDshOnPath() {
 /**
  * 自动探测 DSH 桌面端安装根目录下的 headless 启动器。
  * 目录名随安装方式而异（Windows 默认 %LOCALAPPDATA%\Programs\<产品名>，
- * macOS 为 /Applications/<产品名>.app/Contents），所以扫描一级子目录而非写死产品名。
+ * macOS 为 /Applications/<产品名>.app/Contents 或 ~/Applications/<产品名>.app/Contents），
+ * 所以扫描一级子目录而非写死产品名。
  * 桌面端找不到时退回 npm 全局安装的 dsh；仍探测不到时请显式设置 DSH_CREW_DSH_CMD。
  */
 function detectDshCmd() {
@@ -61,7 +63,7 @@ function detectDshCmd() {
     if (process.env.LOCALAPPDATA) roots.push(path.join(process.env.LOCALAPPDATA, 'Programs'));
     roots.push('C:/Program Files');
   } else if (process.platform === 'darwin') {
-    roots.push('/Applications');
+    roots.push('/Applications', path.join(HOME, 'Applications'));
   } else {
     roots.push('/opt');
   }
@@ -156,17 +158,28 @@ function spawnDsh(args, opts) {
   return spawn(DSH_CMD, args, Object.assign({ shell: false }, opts));
 }
 
-const HEADLESS_HINT = '当前 dsh 的 headless 不支持 dsh-crew 需要的参数（--json / --session-id 等），'
+const HEADLESS_HINT = '当前 dsh 的 headless 不支持 dsh-crew 需要的参数（--patch / --json / --session-id 等），'
   + '请升级 dsh（实测 0.2.2-rc.1 可用，0.1.5-rc.2 不支持）。';
 
-/** 用 `--profile headless --help` 检查 headless 是否支持桥需要的参数；不运行任务，不花 token。 */
+const headlessProbeCache = new Map();
+
+/**
+ * 用 `--profile headless [--patch <CRED_PATCH>] --help` 检查启动器与 headless 是否支持桥需要的参数；
+ * 不运行任务，不花 token，成功后按 DSH_CMD 路径在进程内存中缓存结果。
+ */
 function probeHeadless() {
+  if (!DSH_CMD) return Promise.resolve({ ok: false, detail: 'DSH_CMD 未配置' });
+  const cached = headlessProbeCache.get(DSH_CMD);
+  if (cached) return Promise.resolve(cached);
   return new Promise((resolve) => {
-    if (!DSH_CMD) { resolve({ ok: false, detail: 'DSH_CMD 未配置' }); return; }
     let out = '';
     let child;
+    const probePatch = existsSync(CRED_PATCH) ? CRED_PATCH : (existsSync(BUNDLED_PATCH) ? BUNDLED_PATCH : '');
+    const probeArgs = probePatch
+      ? ['--profile', 'headless', '--patch', probePatch, '--help']
+      : ['--profile', 'headless', '--help'];
     try {
-      child = spawnDsh(['--profile', 'headless', '--help'], {
+      child = spawnDsh(probeArgs, {
         cwd: existsSync(DEFAULT_CWD) ? DEFAULT_CWD : HOME, env: childEnv(), stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (e) {
@@ -183,10 +196,16 @@ function probeHeadless() {
     child.on('close', () => {
       clearTimeout(timer);
       const need = ['--json', '--session-id', '--permission-mode', '--approval-policy'];
-      const missing = need.filter((f) => !out.includes(f));
-      resolve(missing.length
-        ? { ok: false, detail: HEADLESS_HINT + ' 缺少：' + missing.join(', ') }
-        : { ok: true, detail: 'headless 支持 ' + need.join(' ') });
+      const missing = [];
+      if (probePatch && /unknown option '--patch'/i.test(out)) missing.push('--patch');
+      for (const f of need) if (!out.includes(f)) missing.push(f);
+      if (missing.length) {
+        resolve({ ok: false, detail: HEADLESS_HINT + ' 缺少：' + missing.join(', ') });
+      } else {
+        const res = { ok: true, detail: 'headless 支持 ' + (probePatch ? '--patch ' : '') + need.join(' ') };
+        headlessProbeCache.set(DSH_CMD, res);
+        resolve(res);
+      }
     });
   });
 }
@@ -224,7 +243,7 @@ function serialize(fn) {
 }
 
 function runHeadless(opts) {
-  const { task, sessionId, cwd, permission, approvalPolicy, timeoutMs, patches } = opts;
+  const { task, sessionId, cwd, permission, approvalPolicy, timeoutMs = DEFAULT_TIMEOUT_MS, patches = [] } = opts;
   return new Promise((resolve) => {
     if (!DSH_CMD) {
       resolve({
@@ -302,10 +321,12 @@ function runHeadless(opts) {
       const reason = final && final.reason ? final.reason : null;
       const errObj = reason && reason.kind === 'error' ? reason.error : null;
       const oldHeadless = /unknown option '--(json|patch|session-id|permission-mode|approval-policy)'/.test(stderr);
+      const stderrTail = stderr.trim().split(/\r?\n/).pop() || ('exit ' + code);
       const fallback = streamError
-        || (stderr.trim().split(/\r?\n/).pop() || ('exit ' + code));
+        ? streamError
+        : (code === 0 ? 'NO_FINAL_EVENT: ' : '') + stderrTail;
       resolve({
-        ok: code === 0 && !!final && !errObj && !killedByTimeout,
+        ok: code === 0 && !!final && !errObj && !streamError && !killedByTimeout,
         exitCode: code,
         killedByTimeout,
         sessionId: resolvedSessionId,
@@ -313,8 +334,8 @@ function runHeadless(opts) {
         error: killedByTimeout
           ? 'TIMEOUT: 超过 ' + timeoutMs + ' ms 未完成，已终止本轮'
           : errObj ? ((errObj.code ? errObj.code + ': ' : '') + errObj.message)
-          : code === 0 && final ? null
-          : (oldHeadless ? HEADLESS_HINT + '\n' : '') + (code === 0 ? 'NO_FINAL_EVENT: ' : '') + fallback,
+          : code === 0 && final && !streamError ? null
+          : (oldHeadless ? HEADLESS_HINT + '\n' : '') + fallback,
         usage,
         stderr: stderr.slice(-4000),
         reasonKind: reason ? reason.kind : null,

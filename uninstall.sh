@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Antigravity Agent Rules - uninstaller for macOS / Linux (hook layer only).
-# Equivalent of: powershell -File .\uninstall.ps1
+# Antigravity Agent Rules - One-Click Uninstaller for macOS / Linux.
+# Equivalent of: powershell -File .\uninstall.ps1 (restores both full and hook-only installs)
 # Usage: ./uninstall.sh [--force] [--target-home DIR]
 # The actual logic lives in hooks/unix/hooks-installer.mjs (Node, no dependencies).
 set -euo pipefail

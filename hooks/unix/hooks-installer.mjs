@@ -1,34 +1,29 @@
 #!/usr/bin/env node
 // ============================================================================
-// Antigravity Agent Rules - hook layer installer for macOS / Linux
+// Antigravity Agent Rules - One-Click Installer for macOS / Linux
 // ----------------------------------------------------------------------------
-// Unix counterpart of `install.ps1 -HookOnly` / `uninstall.ps1`. Called by the
-// repo-root install.sh / uninstall.sh wrappers.
+// Unix counterpart of `install.ps1` / `uninstall.ps1`. Called by the repo-root
+// `install.sh` / `uninstall.sh` wrappers.
 //
-//   node hooks/unix/hooks-installer.mjs install   [--force] [--skip-hook-verify] [--target-home DIR]
+// Deploys the 5-layer governance rules, hooks, skills, subagents, and tone
+// plugins into ~/.gemini (or only the hook layer when --hook-only is passed).
+//
+// Usage:
+//   node hooks/unix/hooks-installer.mjs install   [--force] [--hook-only] [--skip-hook-verify] [--workspace-path DIR] [--target-home DIR]
 //   node hooks/unix/hooks-installer.mjs uninstall [--force] [--target-home DIR]
 //
-// install:
-//   1. Pre-validates the existing ~/.gemini/config/hooks.json BEFORE touching
-//      anything; aborts on a parse error.
-//   2. Lists files that will be modified and asks for 'y' (skip with --force).
+// Key safety guarantees:
+//   1. Pre-validates existing ~/.gemini/config/config.json and hooks.json
+//      BEFORE modifying any files; aborts immediately on parse failure.
+//   2. Lists all existing files/directories that will be merged or overwritten
+//      and prompts for 'y' confirmation (default: No). Use --force to skip.
 //   3. Backs up pre-existing targets into
 //      ~/.gemini/backup_antigravity_rules_<timestamp>/ with manifest.json
-//      (mode = hook-only), the same layout install.ps1 uses.
-//   4. Merges hooks.json by top-level keys (hard-gate, read-loop-efficiency,
-//      read-loop-enforcement). Commands are rewritten for `sh -c`:
-//        powershell ... pretool_guard.ps1  ->  "<node>" ./scripts/pretool_guard.cjs
-//        node ./scripts/...                ->  "<node>" ./scripts/...
-//      <node> is the absolute path of the Node running this installer, because
-//      a GUI-launched Antigravity may not have Homebrew's bin dir on PATH.
-//   5. Copies hooks/scripts/* into ~/.gemini/config/scripts/.
-//   6. Runs `python3 verify-hook.py --guard node` unless --skip-hook-verify.
-//
-// uninstall:
-//   Restores hooks.json and scripts/* from the latest backup snapshot and
-//   deletes the ones that did not exist before installation. Only hook-only
-//   snapshots are accepted; full installs are produced by install.ps1 on
-//   Windows and must be removed with uninstall.ps1.
+//      (mode = 'full' | 'hook-only').
+//   4. Merges GEMINI.md using <!-- antigravity-agent-rules:begin/end -->
+//      markers and merges hooks.json by top-level keys (hard-gate,
+//      read-loop-efficiency, read-loop-enforcement), rewriting commands to use
+//      the absolute Node path so GUI-launched Antigravity finds node reliably.
 // ============================================================================
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -41,23 +36,54 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const REPO_HOOKS = path.join(REPO_ROOT, 'hooks', 'hooks.json');
 const REPO_SCRIPTS = path.join(REPO_ROOT, 'hooks', 'scripts');
+const REPO_GEMINI = path.join(REPO_ROOT, 'global', 'GEMINI.md');
 const HOOK_TOP_KEYS = ['hard-gate', 'read-loop-efficiency', 'read-loop-enforcement'];
+const PLUGIN_NAMES = [
+  'anyi-global-rules',
+  'search-routing',
+  'docx-delivery',
+  'lieflat-less-ai-tone',
+  'humanizer-zh',
+];
+const ANYI_RULE_FILES = [
+  'BACKGROUND-RESOURCES.md',
+  'IMPLEMENTATION.md',
+  'LONG-TASKS.md',
+  'RELEASE-PACKAGING.md',
+  'RULE-MAINTENANCE.md',
+  'WINDOWS-RELEASE.md',
+];
+const ANYI_SKILLS = ['task-intake', 'safe-network-diagnostics', 'multi-agent-orchestrator'];
+const STANDALONE_SKILLS = ['client-maintenance', 'chinese-novelist'];
+
 // install.sh passes the Node path it found on PATH (e.g. /opt/homebrew/bin/node). Prefer it over
 // process.execPath, which under Homebrew is a versioned Cellar path that breaks on `brew upgrade`.
 const NODE = process.env.HOOKS_NODE || process.execPath;
 
 function parseArgs(argv) {
-  const opts = { action: argv[0], force: false, skipVerify: false, home: os.homedir() };
+  const opts = {
+    action: argv[0],
+    force: false,
+    hookOnly: false,
+    skipVerify: false,
+    workspacePath: '',
+    home: os.homedir(),
+  };
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--force' || a === '-f') opts.force = true;
+    else if (a === '--hook-only' || a === '-HookOnly') opts.hookOnly = true;
     else if (a === '--skip-hook-verify') opts.skipVerify = true;
-    else if (a === '--target-home') opts.home = argv[++i];
+    else if (a === '--workspace-path' || a === '-w') opts.workspacePath = argv[++i] || '';
+    else if (a === '--target-home') opts.home = argv[++i] || '';
     else fail('unknown option: ' + a);
   }
-  if (!['install', 'uninstall'].includes(opts.action)) fail('usage: hooks-installer.mjs install|uninstall [options]');
+  if (!['install', 'uninstall'].includes(opts.action)) {
+    fail('usage: hooks-installer.mjs install|uninstall [--force] [--hook-only] [--skip-hook-verify] [--workspace-path DIR] [--target-home DIR]');
+  }
   if (!opts.home) fail('--target-home cannot be empty.');
   opts.home = path.resolve(opts.home);
+  if (opts.workspacePath) opts.workspacePath = path.resolve(opts.workspacePath);
   return opts;
 }
 
@@ -66,10 +92,23 @@ function fail(msg) {
   process.exit(1);
 }
 
+function toForwardSlash(p) {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
 function paths(home) {
   const gemini = path.join(home, '.gemini');
   const config = path.join(gemini, 'config');
-  return { gemini, config, hooks: path.join(config, 'hooks.json'), scripts: path.join(config, 'scripts') };
+  return {
+    gemini,
+    config,
+    configJson: path.join(config, 'config.json'),
+    hooks: path.join(config, 'hooks.json'),
+    scripts: path.join(config, 'scripts'),
+    plugins: path.join(config, 'plugins'),
+    agySkills: path.join(gemini, 'antigravity', 'skills'),
+    geminiMd: path.join(gemini, 'GEMINI.md'),
+  };
 }
 
 function readJsonOrNull(file, label) {
@@ -98,10 +137,29 @@ function timestamp() {
   return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
-/** Managed targets relative to ~/.gemini, POSIX separators. */
-function managedRelPaths() {
-  const scripts = fs.readdirSync(REPO_SCRIPTS).filter((f) => fs.statSync(path.join(REPO_SCRIPTS, f)).isFile()).sort();
-  return ['config/hooks.json', ...scripts.map((f) => 'config/scripts/' + f)];
+/** Managed targets relative to ~/.gemini (POSIX separators). */
+function getManagedTargets(hookOnly) {
+  const scripts = fs.readdirSync(REPO_SCRIPTS)
+    .filter((f) => fs.statSync(path.join(REPO_SCRIPTS, f)).isFile())
+    .sort();
+  const hookTargets = [
+    { rel: 'config/hooks.json', mode: 'MERGE (top-level keys)' },
+    ...scripts.map((f) => ({ rel: 'config/scripts/' + f, mode: 'OVERWRITE' })),
+  ];
+  if (hookOnly) return hookTargets;
+  return [
+    { rel: 'GEMINI.md', mode: 'MERGE (marker block)' },
+    hookTargets[0],
+    { rel: 'config/config.json', mode: 'MERGE (enable 5 plugins)' },
+    ...hookTargets.slice(1),
+    { rel: 'config/plugins/anyi-global-rules', mode: 'OVERWRITE' },
+    { rel: 'config/plugins/search-routing', mode: 'OVERWRITE' },
+    { rel: 'config/plugins/docx-delivery', mode: 'OVERWRITE' },
+    { rel: 'config/plugins/lieflat-less-ai-tone', mode: 'OVERWRITE' },
+    { rel: 'config/plugins/humanizer-zh', mode: 'OVERWRITE' },
+    { rel: 'antigravity/skills/client-maintenance', mode: 'OVERWRITE' },
+    { rel: 'antigravity/skills/chinese-novelist', mode: 'OVERWRITE' },
+  ];
 }
 
 /** Rewrite repo hook commands so they run under `sh -c` with an absolute Node path. */
@@ -124,26 +182,86 @@ function rewriteHooks(value) {
   return value;
 }
 
+/** Replace path placeholders (<YOUR_PATH>, <YOUR_PROJECT_PATH>, %USERPROFILE%\...) in Markdown files. */
+function formatMarkdownContent(rawText, forwardHome, forwardWs) {
+  let out = rawText.replaceAll('<YOUR_PATH>', forwardHome);
+  if (forwardWs) {
+    out = out.replaceAll('<YOUR_PROJECT_PATH>', forwardWs);
+  }
+  // Convert path-prefixed %USERPROFILE%\... or $env:USERPROFILE\... to $HOME/... on Unix
+  out = out.replace(/%USERPROFILE%[\\/]/g, '$HOME/');
+  out = out.replace(/\$env:USERPROFILE[\\/]/g, '$HOME/');
+  return out;
+}
+
+function copyWithPlaceholderReplacement(srcFile, dstFile, forwardHome, forwardWs) {
+  fs.mkdirSync(path.dirname(dstFile), { recursive: true });
+  if (path.extname(srcFile).toLowerCase() === '.md') {
+    const raw = fs.readFileSync(srcFile, 'utf8');
+    const formatted = formatMarkdownContent(raw, forwardHome, forwardWs);
+    fs.writeFileSync(dstFile, formatted, 'utf8');
+  } else {
+    fs.copyFileSync(srcFile, dstFile);
+  }
+}
+
+function copyTreeWithReplacement(srcDir, dstDir, forwardHome, forwardWs) {
+  fs.mkdirSync(dstDir, { recursive: true });
+  for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
+    const srcPath = path.join(srcDir, entry.name);
+    const dstPath = path.join(dstDir, entry.name);
+    if (entry.isDirectory()) {
+      copyTreeWithReplacement(srcPath, dstPath, forwardHome, forwardWs);
+    } else {
+      copyWithPlaceholderReplacement(srcPath, dstPath, forwardHome, forwardWs);
+    }
+  }
+}
+
+function copyItemRecursive(srcPath, dstPath) {
+  fs.mkdirSync(path.dirname(dstPath), { recursive: true });
+  const stat = fs.statSync(srcPath);
+  if (stat.isDirectory()) {
+    fs.cpSync(srcPath, dstPath, { recursive: true, force: true });
+  } else {
+    fs.copyFileSync(srcPath, dstPath);
+  }
+}
+
 async function install(opts) {
   const P = paths(opts.home);
+  const forwardHome = toForwardSlash(opts.home);
+  const forwardWs = opts.workspacePath ? toForwardSlash(opts.workspacePath) : '';
+
   console.log('======================================================================');
-  console.log('Antigravity Agent Rules Installer (macOS / Linux, hook layer only)');
+  console.log('Antigravity Agent Rules Installer (macOS / Linux)');
   console.log('  Source Repo : ' + REPO_ROOT);
-  console.log('  Target Home : ' + opts.home);
+  console.log('  Target Home : ' + opts.home + ' (' + forwardHome + ')');
+  if (forwardWs) {
+    console.log('  Workspace   : ' + opts.workspacePath + ' (' + forwardWs + ')');
+  }
   console.log('  Node        : ' + NODE + ' (' + process.version + ')');
+  if (opts.hookOnly) {
+    console.log('  Mode        : HOOK ONLY (hooks.json + scripts/; rules/skills/tone skipped)');
+  } else {
+    console.log('  Mode        : FULL (5 layers: hooks + global + rules + skills/agents + tone)');
+  }
   console.log('======================================================================');
 
-  // 0. Pre-parse before touching anything
+  // 0. Pre-parse config.json and hooks.json before touching anything
+  const existingCfg = opts.hookOnly ? null : readJsonOrNull(P.configJson, 'existing config.json');
   const existingHooks = readJsonOrNull(P.hooks, 'existing hooks.json');
   const repoHooks = readJsonOrNull(REPO_HOOKS, 'repo hooks.json');
   if (!repoHooks) fail('repo hooks/hooks.json is missing or empty.');
 
-  const managed = managedRelPaths();
-  const existing = managed.filter((rel) => fs.existsSync(path.join(P.gemini, rel)));
+  const managed = getManagedTargets(opts.hookOnly);
+  const existing = managed.filter((item) => fs.existsSync(path.join(P.gemini, item.rel)));
   console.log('');
   if (existing.length) {
-    console.log(`The following existing files in '${P.gemini}' will be modified:`);
-    for (const rel of existing) console.log(`  [${rel === 'config/hooks.json' ? 'MERGE (top-level keys)' : 'OVERWRITE'}] ${path.join(P.gemini, rel)}`);
+    console.log(`The following existing files/directories in '${P.gemini}' will be modified:`);
+    for (const item of existing) {
+      console.log(`  [${item.mode}] ${path.join(P.gemini, item.rel)}`);
+    }
   } else {
     console.log(`No existing target files found in '${P.gemini}' (clean install).`);
   }
@@ -153,58 +271,212 @@ async function install(opts) {
     return 0;
   }
 
-  // 1. Backup
+  // 1. Backup existing files/directories into ~/.gemini/backup_antigravity_rules_<timestamp>
   const stamp = timestamp();
   const backupDir = path.join(P.gemini, 'backup_antigravity_rules_' + stamp);
   fs.mkdirSync(backupDir, { recursive: true });
-  for (const rel of existing) {
-    const dst = path.join(backupDir, rel);
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(path.join(P.gemini, rel), dst);
+  for (const item of existing) {
+    const src = path.join(P.gemini, item.rel);
+    const dst = path.join(backupDir, item.rel);
+    copyItemRecursive(src, dst);
   }
   const manifest = {
     timestamp: stamp,
     targetHome: opts.home,
-    workspacePath: '',
-    mode: 'hook-only',
+    workspacePath: opts.workspacePath,
+    mode: opts.hookOnly ? 'hook-only' : 'full',
     platform: process.platform,
-    preExisting: existing,
+    preExisting: existing.map((x) => x.rel),
   };
-  fs.writeFileSync(path.join(backupDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
-  console.log(`[1/3] Created backup snapshot (${existing.length} pre-existing item(s)): ${backupDir}`);
+  fs.writeFileSync(path.join(backupDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  console.log(`[1/5] Created backup snapshot (${existing.length} pre-existing item(s)): ${backupDir}`);
 
-  // 2. Merge hooks.json & copy scripts
+  // 2. Deploy Layer 1: hooks/ -> merge hooks.json & copy scripts/
   fs.mkdirSync(P.scripts, { recursive: true });
-  const merged = existingHooks && typeof existingHooks === 'object' && !Array.isArray(existingHooks) ? existingHooks : {};
-  const rewritten = rewriteHooks(repoHooks);
-  for (const key of HOOK_TOP_KEYS) merged[key] = rewritten[key];
-  fs.writeFileSync(P.hooks, JSON.stringify(merged, null, 2) + '\n');
-  for (const rel of managed.filter((r) => r.startsWith('config/scripts/'))) {
-    fs.copyFileSync(path.join(REPO_SCRIPTS, path.basename(rel)), path.join(P.gemini, rel));
+  const mergedHooks = existingHooks && typeof existingHooks === 'object' && !Array.isArray(existingHooks) ? existingHooks : {};
+  const rewrittenHooks = rewriteHooks(repoHooks);
+  for (const key of HOOK_TOP_KEYS) {
+    mergedHooks[key] = rewrittenHooks[key];
   }
-  console.log('[2/3] Merged hooks.json (top-level keys) & deployed scripts/.');
+  fs.writeFileSync(P.hooks, JSON.stringify(mergedHooks, null, 2) + '\n', 'utf8');
+  copyTreeWithReplacement(REPO_SCRIPTS, P.scripts, forwardHome, forwardWs);
+  console.log('[2/5] Merged hooks.json (top-level keys) & deployed scripts/.');
 
-  // 3. Self-test
+  if (opts.hookOnly) {
+    console.log('[3-5/5] Skipped (--hook-only): GEMINI.md, config.json, rules/, skills/, agents/, tone/ untouched.');
+  } else {
+    // 3. Deploy Layer 2 & 3: merge GEMINI.md & deploy global/ + rules/
+    fs.mkdirSync(P.gemini, { recursive: true });
+    const beginMarker = '<!-- antigravity-agent-rules:begin -->';
+    const endMarker = '<!-- antigravity-agent-rules:end -->';
+    const repoGeminiRaw = fs.readFileSync(REPO_GEMINI, 'utf8');
+    const repoGeminiFmt = formatMarkdownContent(repoGeminiRaw, forwardHome, forwardWs).replace(/[\r\n]+$/, '');
+    const wrappedBlock = `${beginMarker}\n${repoGeminiFmt}\n${endMarker}`;
+
+    let finalGemini;
+    if (fs.existsSync(P.geminiMd)) {
+      const existingGemini = fs.readFileSync(P.geminiMd, 'utf8');
+      const idxBegin = existingGemini.indexOf(beginMarker);
+      const idxEnd = existingGemini.indexOf(endMarker);
+      if (idxBegin >= 0 && idxEnd > idxBegin) {
+        const before = existingGemini.slice(0, idxBegin);
+        const after = existingGemini.slice(idxEnd + endMarker.length);
+        finalGemini = before + wrappedBlock + after;
+      } else if (!existingGemini.trim()) {
+        finalGemini = wrappedBlock + '\n';
+      } else {
+        finalGemini = existingGemini.replace(/[\r\n]+$/, '') + '\n\n' + wrappedBlock + '\n';
+      }
+    } else {
+      finalGemini = wrappedBlock + '\n';
+    }
+    fs.writeFileSync(P.geminiMd, finalGemini, 'utf8');
+
+    const anyiPluginDir = path.join(P.plugins, 'anyi-global-rules');
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'global', 'plugin.json'),
+      path.join(anyiPluginDir, 'plugin.json'),
+      forwardHome,
+      forwardWs,
+    );
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'global', 'AGENTS.md'),
+      path.join(anyiPluginDir, 'rules', 'AGENTS.md'),
+      forwardHome,
+      forwardWs,
+    );
+    for (const rf of ANYI_RULE_FILES) {
+      copyWithPlaceholderReplacement(
+        path.join(REPO_ROOT, 'rules', rf),
+        path.join(anyiPluginDir, 'rules', rf),
+        forwardHome,
+        forwardWs,
+      );
+    }
+
+    const searchPluginDir = path.join(P.plugins, 'search-routing');
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'rules', 'search-routing.plugin.json'),
+      path.join(searchPluginDir, 'plugin.json'),
+      forwardHome,
+      forwardWs,
+    );
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'rules', 'SEARCH-ROUTING.md'),
+      path.join(searchPluginDir, 'rules', 'SEARCH-ROUTING.md'),
+      forwardHome,
+      forwardWs,
+    );
+    console.log('[3/5] Merged GEMINI.md & deployed Layer 2 (global/) + Layer 3 (rules/).');
+
+    // 4. Deploy Layer 4 & 5: skills/, agents/, and tone/
+    for (const sk of ANYI_SKILLS) {
+      copyTreeWithReplacement(
+        path.join(REPO_ROOT, 'skills', sk),
+        path.join(anyiPluginDir, 'skills', sk),
+        forwardHome,
+        forwardWs,
+      );
+    }
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'agents', 'flash-verifier.md'),
+      path.join(anyiPluginDir, 'agents', 'flash-verifier.md'),
+      forwardHome,
+      forwardWs,
+    );
+    copyTreeWithReplacement(
+      path.join(REPO_ROOT, 'skills', 'research-routing'),
+      path.join(searchPluginDir, 'skills', 'research-routing'),
+      forwardHome,
+      forwardWs,
+    );
+    copyTreeWithReplacement(
+      path.join(REPO_ROOT, 'skills', 'docx-delivery'),
+      path.join(P.plugins, 'docx-delivery'),
+      forwardHome,
+      forwardWs,
+    );
+    copyTreeWithReplacement(
+      path.join(REPO_ROOT, 'tone', 'lieflat-less-ai-tone'),
+      path.join(P.plugins, 'lieflat-less-ai-tone'),
+      forwardHome,
+      forwardWs,
+    );
+    copyTreeWithReplacement(
+      path.join(REPO_ROOT, 'tone', 'humanizer-zh'),
+      path.join(P.plugins, 'humanizer-zh'),
+      forwardHome,
+      forwardWs,
+    );
+
+    for (const ssk of STANDALONE_SKILLS) {
+      copyTreeWithReplacement(
+        path.join(REPO_ROOT, 'skills', ssk),
+        path.join(P.agySkills, ssk),
+        forwardHome,
+        forwardWs,
+      );
+      if (opts.workspacePath) {
+        const wsSkillDir = path.join(opts.workspacePath, '.agents', 'skills', ssk);
+        copyTreeWithReplacement(
+          path.join(REPO_ROOT, 'skills', ssk),
+          wsSkillDir,
+          forwardHome,
+          forwardWs,
+        );
+      }
+    }
+    console.log('[4/5] Deployed Layer 4 (skills/ & agents/) & Layer 5 (tone/).');
+
+    // 5. Enable 5 plugins in ~/.gemini/config/config.json
+    const cfgObj = existingCfg && typeof existingCfg === 'object' && !Array.isArray(existingCfg) ? existingCfg : {};
+    if (!cfgObj.plugins || typeof cfgObj.plugins !== 'object' || Array.isArray(cfgObj.plugins)) {
+      cfgObj.plugins = {};
+    }
+    for (const pName of PLUGIN_NAMES) {
+      if (!cfgObj.plugins[pName] || typeof cfgObj.plugins[pName] !== 'object') {
+        cfgObj.plugins[pName] = { enabled: true };
+      } else {
+        cfgObj.plugins[pName].enabled = true;
+      }
+    }
+    fs.writeFileSync(P.configJson, JSON.stringify(cfgObj, null, 2) + '\n', 'utf8');
+    console.log(`[5/5] Enabled 5 plugins in: ${P.configJson}`);
+  }
+
+  // 6. Optional: Run verify-hook.py self-test
   if (opts.skipVerify) {
-    console.log('[3/3] Skipped hook self-test (--skip-hook-verify).');
+    console.log('Skipped hook self-test (--skip-hook-verify).');
   } else {
     const py = ['python3', 'python'].find((c) => spawnSync(c, ['--version'], { stdio: 'ignore' }).status === 0);
     if (!py) {
-      console.log('[3/3] WARNING: python3 not found, hook self-test skipped. Run it later with:');
-      console.log(`      python3 "${path.join(P.scripts, 'verify-hook.py')}" --guard node`);
+      console.log('WARNING: python3 not found, hook self-test skipped. Run it later with:');
+      console.log(`  python3 "${path.join(P.scripts, 'verify-hook.py')}" --guard node`);
     } else {
-      console.log(`[3/3] Running hook self-test (${py} verify-hook.py --guard node)...`);
+      console.log('');
+      console.log(`Running PreToolUse hook self-test (${py} verify-hook.py --guard node)...`);
       const r = spawnSync(py, [path.join(P.scripts, 'verify-hook.py'), '--guard', 'node'], {
-        cwd: P.scripts, stdio: 'inherit', env: Object.assign({}, process.env, { NODE }),
+        cwd: P.scripts,
+        stdio: 'inherit',
+        env: Object.assign({}, process.env, { NODE }),
       });
       if (r.status !== 0) {
-        console.error('Hook self-test FAILED. The hooks are installed; restore the previous state with ./uninstall.sh.');
+        console.error('Hook self-test FAILED. Restore the previous state with ./uninstall.sh.');
         return 1;
+      }
+      const tmpLog = path.join(P.scripts, 'hook_log.jsonl');
+      if (fs.existsSync(tmpLog)) {
+        fs.rmSync(tmpLog, { force: true });
       }
     }
   }
+
   console.log('');
-  console.log('Done. Start a new conversation (or restart Antigravity) for the hooks to take effect.');
+  if (opts.hookOnly) {
+    console.log('SUCCESS: Antigravity Agent Rules hook layer installed (hook-only mode).');
+  } else {
+    console.log('SUCCESS: Antigravity Agent Rules installed and verified.');
+  }
   return 0;
 }
 
@@ -216,46 +488,85 @@ async function uninstall(opts) {
   }
   const backups = fs.readdirSync(P.gemini)
     .filter((n) => n.startsWith('backup_antigravity_rules_') && fs.statSync(path.join(P.gemini, n)).isDirectory())
-    .sort().reverse();
-  if (!backups.length) fail(`No 'backup_antigravity_rules_*' directory found in '${P.gemini}'. Cannot safely determine pre-install state.`);
+    .sort()
+    .reverse();
+  if (!backups.length) {
+    fail(`No 'backup_antigravity_rules_*' directory found in '${P.gemini}'. Cannot safely determine pre-install state.`);
+  }
   const latest = path.join(P.gemini, backups[0]);
   let mode = 'full';
-  try { mode = JSON.parse(fs.readFileSync(path.join(latest, 'manifest.json'), 'utf8')).mode || 'full'; } catch { /* keep full */ }
-  if (mode !== 'hook-only') {
-    fail(`Latest backup '${latest}' is a '${mode}' install (made by install.ps1). Use uninstall.ps1 on Windows for it.`);
+  try {
+    mode = JSON.parse(fs.readFileSync(path.join(latest, 'manifest.json'), 'utf8')).mode || 'full';
+  } catch {
+    /* default to full */
   }
+
+  const hookOnly = mode === 'hook-only';
+  const cfgObj = hookOnly ? null : readJsonOrNull(P.configJson, 'existing config.json');
+
+  // Managed targets (excluding config/config.json, which is handled via key removal)
+  const managedRelPaths = getManagedTargets(hookOnly)
+    .map((x) => x.rel)
+    .filter((rel) => rel !== 'config/config.json');
 
   const toRestore = [];
   const toDelete = [];
-  for (const rel of managedRelPaths()) {
+  for (const rel of managedRelPaths) {
     const backupItem = path.join(latest, rel);
     const liveItem = path.join(P.gemini, rel);
-    if (fs.existsSync(backupItem)) toRestore.push({ backupItem, liveItem });
-    else if (fs.existsSync(liveItem)) toDelete.push(liveItem);
+    if (fs.existsSync(backupItem)) {
+      toRestore.push({ rel, backupItem, liveItem });
+    } else if (fs.existsSync(liveItem)) {
+      toDelete.push({ rel, liveItem });
+    }
   }
 
   console.log('======================================================================');
-  console.log('Antigravity Agent Rules Uninstaller (macOS / Linux, hook layer only)');
+  console.log('Antigravity Agent Rules Uninstaller (macOS / Linux)');
   console.log('  Target Home   : ' + opts.home);
-  console.log('  Latest Backup : ' + latest);
+  console.log('  Latest Backup : ' + latest + ` (mode: ${mode})`);
   console.log('======================================================================');
   console.log('');
   console.log('Planned actions:');
   for (const r of toRestore) console.log('  [RESTORE from backup] ' + r.liveItem);
-  for (const d of toDelete) console.log('  [DELETE (new item)]   ' + d);
-  if (!toRestore.length && !toDelete.length) console.log('  (nothing to do)');
+  for (const d of toDelete) console.log('  [DELETE (new item)]   ' + d.liveItem);
+  if (!hookOnly && fs.existsSync(P.configJson)) {
+    console.log('  [CLEANUP 5 plugins]   ' + P.configJson);
+  }
+  if (!toRestore.length && !toDelete.length && (hookOnly || !fs.existsSync(P.configJson))) {
+    console.log('  (nothing to do)');
+  }
   console.log('');
   if (!(await confirm('Proceed with uninstall?', opts.force))) {
     console.log('Aborted by user. No files were modified.');
     return 0;
   }
+
+  // 1. Restore pre-existing items from latest backup
   for (const r of toRestore) {
-    fs.mkdirSync(path.dirname(r.liveItem), { recursive: true });
-    fs.copyFileSync(r.backupItem, r.liveItem);
+    if (fs.existsSync(r.liveItem)) {
+      fs.rmSync(r.liveItem, { recursive: true, force: true });
+    }
+    copyItemRecursive(r.backupItem, r.liveItem);
   }
-  for (const d of toDelete) fs.rmSync(d, { force: true });
-  console.log(`Restored ${toRestore.length} item(s), deleted ${toDelete.length} item(s).`);
-  console.log('Start a new conversation (or restart Antigravity) for the change to take effect.');
+
+  // 2. Delete items that did not exist prior to installation
+  for (const d of toDelete) {
+    if (fs.existsSync(d.liveItem)) {
+      fs.rmSync(d.liveItem, { recursive: true, force: true });
+    }
+  }
+
+  // 3. Remove only the 5 plugin entries from config.json
+  if (!hookOnly && cfgObj && cfgObj.plugins && typeof cfgObj.plugins === 'object') {
+    for (const pName of PLUGIN_NAMES) {
+      delete cfgObj.plugins[pName];
+    }
+    fs.writeFileSync(P.configJson, JSON.stringify(cfgObj, null, 2) + '\n', 'utf8');
+  }
+
+  console.log('');
+  console.log(`SUCCESS: Uninstalled Antigravity Agent Rules and restored pre-install state from '${latest}'.`);
   return 0;
 }
 

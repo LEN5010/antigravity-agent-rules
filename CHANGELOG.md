@@ -1,19 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.0] - 2026-11-10
 
-- `mcp/dsh-crew` 0.1.1：修复 macOS 上的四处运行问题，Windows 行为保持不变。
+- **macOS / Linux 全量 5 层一键安装与跨平台规则补齐**：
+  - 扩充 `hooks/unix/hooks-installer.mjs`（及根目录 `install.sh` / `uninstall.sh`）：默认支持与 `install.ps1` 完全对等的 **5 层全量安装（Full mode）**，自动无损合并 `~/.gemini/GEMINI.md`（按 `<!-- antigravity-agent-rules:begin/end -->` 标记）与 `~/.gemini/config/hooks.json`、部署 5 个插件到 `~/.gemini/config/plugins/`、部署独立 Skills 到 `~/.gemini/antigravity/skills/`（支持 `--workspace-path` 同步至工作区 `.agents/skills/`）、启用 `~/.gemini/config/config.json` 中的 5 个插件开关，并将 `<YOUR_PATH>` 与 `%USERPROFILE%\...` 路径占位符替换为 `$HOME` 正斜杠路径；保留 `--hook-only` 作为仅安装 Hook 层的可选参数，`uninstall.sh` 自动识别 `full` / `hook-only` 备份快照并完整还原。
+  - 更新 `global/GEMINI.md`：将「Shell 偏好」改为按平台分流（Windows 下使用 Git Bash / `pwsh` 7；macOS / Linux 下直接使用系统原生 `zsh` / `bash`），并在「用户代理与网络配置：未经许可一律只读」中补充 macOS / Linux 下禁止停止的代理服务（`launchctl` / `systemctl` / `osascript ... quit`）与禁止修改的网络/代理命令（`networksetup -set*`、`scutil`、`ifconfig ... down`、`nmcli`、`pfctl`）。
+  - 更新 `skills/safe-network-diagnostics/SKILL.md`：在 Windows（`reg query`、`netsh winhttp show proxy`、`netstat -ano`）旁完整补充 macOS（`scutil --proxy`、`networksetup -getwebproxy Wi-Fi`、`lsof`、`scutil --dns`、`ifconfig`）与 Linux（`env | grep -i proxy`、`ss -tulnp`、`ip addr`、`ip route`）的只读网络诊断命令对照。
+- **Hook 守卫层支持 macOS / Linux**（Windows 默认行为不变，仍使用 `pretool_guard.ps1`）：
+  - 新增 `hooks/scripts/pretool_guard.cjs`：`pretool_guard.ps1` 的 Node 跨平台版，29 条通用/Windows 规则逐条一致，另加 17 条 macOS / Linux 规则（`diskutil erase*`、`dd of=/dev/`、`mkfs`/`newfs_*`、`tmutil delete`、`csrutil disable`；`kill`/`pkill`/`killall`/`launchctl`/`systemctl`/`osascript quit` 结束代理客户端；`networksetup -set*`、`ifconfig down`、`ipconfig set`、`route delete/flush/change`、`pfctl -d/-F`、`nmcli` 断网）。
+  - `hooks.json` 在 macOS / Linux 安装时自动将命令改写为 Node 绝对路径，避免 GUI 启动的 Antigravity 找不到 `node`。
+  - `verify-hook.py` 新增 `--guard ps|node`（非 Windows 默认 `node`），Node 版额外跑 38 项 macOS / Linux 用例，合计 78 项自检全通。
+  - `install.ps1` / `uninstall.ps1` 的受管文件清单加入 `pretool_guard.cjs`，保证 Windows 卸载时一并清理。
+- **`mcp/dsh-crew` 0.1.1 跨平台适配**：修复 macOS 上的四处运行问题，Windows 行为保持不变。
   - 非 Windows 平台改为直接 exec 启动器、不经 shell，`/Applications/<产品名>.app/...` 这类带空格的路径不再被拆开；Windows 仍经 `cmd.exe`，并给启动器路径本身加引号。
   - 凭据补丁拆成两份：`crew-credentials.patch.yml` 只保留官方三条开关；Command Code 默认模型移到 `crew-commandcode.patch.yml`，仅在本机存在 `dsh-commandcode` 插件时叠加。插件 URL 改用 `pathToFileURL` 生成，修复 macOS 上拼出 `file:////Users/...` 导致插件加载失败的问题。
   - 子进程 PATH 末尾追加当前 node 所在目录，修复 GUI 客户端启动时 npm 版 `dsh` 报 `env: node: No such file or directory`。
   - macOS 桌面端探测补充用户级 `~/Applications`；桌面端找不到时退回 PATH、当前 node 所在目录、`/opt/homebrew/bin`、`/usr/local/bin` 与 `~/.volta/bin` 中的 npm 版 `dsh`。
   - `dsh_status` 新增 `headless_cli` 检查（`--profile headless --patch <CRED_PATCH> --help`，不花 token，成功后按 `DSH_CMD` 在进程内存缓存），自检前先落盘补丁；`dsh_asar` 改为参考信息，不再计入 `ready`。
   - 解析 headless `--json` 流中的 `error` 事件（区分 `streamError` 与 `NO_FINAL_EVENT`），补齐 `runHeadless()` 的 `timeoutMs` 默认值；旧版 headless 不认识参数时给出升级提示。
-- Hook 层支持 macOS / Linux（Windows 默认行为不变，仍使用 `pretool_guard.ps1`）：
-  - 新增 `hooks/scripts/pretool_guard.cjs`：`pretool_guard.ps1` 的 Node 跨平台版，29 条规则逐条一致，另加 macOS / Linux 规则（`diskutil erase*`、`dd of=/dev/`、`mkfs`/`newfs_*`、`tmutil delete`、`csrutil disable`；`kill`/`pkill`/`killall`/`launchctl`/`systemctl`/`osascript quit` 结束代理客户端；`networksetup -set*`、`ifconfig down`、`ipconfig set`、`route delete/flush/change`、`pfctl -d/-F`、`nmcli` 断网）。
-  - 新增根目录 `install.sh` / `uninstall.sh`（逻辑在 `hooks/unix/hooks-installer.mjs`），等价于 `install.ps1 -HookOnly` 与 `uninstall.ps1` 的 hook-only 分支；`hooks.json` 中的命令改写为 Node 绝对路径，避免 GUI 启动的 Antigravity 找不到 `node`。
-  - `verify-hook.py` 新增 `--guard ps|node`（非 Windows 默认 `node`），Node 版额外跑 38 项 macOS / Linux 用例，合计 78 项。
-  - `install.ps1` / `uninstall.ps1` 的受管文件清单加入 `pretool_guard.cjs`，保证 Windows 卸载时一并清理。
 
 ## [1.1.0] - 2026-11-09
 

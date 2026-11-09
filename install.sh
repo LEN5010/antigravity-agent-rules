@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Antigravity Agent Rules - installer for macOS / Linux (hook layer only).
-# Equivalent of: powershell -File .\install.ps1 -HookOnly
-# Usage: ./install.sh [--force] [--skip-hook-verify] [--target-home DIR]
+# Antigravity Agent Rules - One-Click Installer for macOS / Linux.
+# Equivalent of: powershell -File .\install.ps1 (supports full 5-layer install and --hook-only)
+# Usage: ./install.sh [--force] [--hook-only] [--skip-hook-verify] [--workspace-path DIR] [--target-home DIR]
 # The actual logic lives in hooks/unix/hooks-installer.mjs (Node, no dependencies).
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

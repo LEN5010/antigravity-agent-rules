@@ -15,15 +15,15 @@
 ## 用户代理与网络配置：未经许可一律只读
 
 - 未经用户当次明确许可，**严禁执行任何停止、禁用、重启、卸载用户代理或修改网络配置的操作**：
-  - 严禁结束代理进程（`clash`、`verge`、`mihomo`、`sing-box`、`v2ray`、`xray`、`neko`、`shadowsocks`、`hysteria` 等）或停止相关 Windows 服务；
-  - 严禁断开网卡/路由（`netsh wlan disconnect`、`Disable-NetAdapter`、`ipconfig /release`、`route delete`）或修改系统代理（`Internet Settings` 注册表、`netsh winhttp set proxy`）。
-- 网络排查一律只用只读命令（`curl` 仅限 GET/HEAD；细则与标准排查 SOP 见 `safe-network-diagnostics` Skill；底层硬拦截见 `~/.gemini/config/scripts/pretool_guard.ps1`）。确需改动代理/网络配置时，先向用户说明原因与影响，等明确批准后再动或请用户自行执行。
+  - 严禁结束代理进程（`clash`、`verge`、`mihomo`、`sing-box`、`v2ray`、`xray`、`neko`、`shadowsocks`、`hysteria`、`surge`、`stash` 等）或停止相关系统服务（Windows 服务、`launchctl bootout/unload`、`systemctl stop/disable`、`osascript ... quit`）；
+  - 严禁断开网卡/路由（Windows：`netsh wlan disconnect`、`Disable-NetAdapter`、`ipconfig /release`、`route delete`；macOS / Linux：`ifconfig ... down`、`ip link set ... down`、`nmcli ... off/down`、`route delete/flush/change`、`pfctl -d/-F`）或修改系统代理（Windows：`Internet Settings` 注册表、`netsh winhttp set proxy`；macOS：`networksetup -set*`、`scutil`）。
+- 网络排查一律只用只读命令（`curl` 仅限 GET/HEAD；细则与标准排查 SOP 见 `safe-network-diagnostics` Skill；底层硬拦截见 `~/.gemini/config/scripts/pretool_guard.ps1` 与 `pretool_guard.cjs`）。确需改动代理/网络配置时，先向用户说明原因与影响，等明确批准后再动或请用户自行执行。
 
 ## Shell 偏好
 
-- 优先使用 Git Bash（bash 语法）执行终端命令：显式调用 `bash -lc "..."`（位于 `C:\Program Files\Git\bin\bash.exe`）。不要默认写 PowerShell/pwsh 语法，除非该操作只能由 PowerShell 完成或用户点名要求。
-- 必须用 PowerShell 时，一律用 pwsh 7（`pwsh`），不用 `powershell`（5.1）；不要主动另起 cmd。
-- 例外：验证目标脚本（BAT/CMD/PowerShell）时允许调用其实际解释器完成实跑；脱钩启动桌面 GUI 客户端或独立常驻程序时允许使用 `Start-Process` 或 `cmd /c start "" <exe>`（见 [BACKGROUND-RESOURCES.md](<file:///<YOUR_PATH>/.gemini/config/plugins/anyi-global-rules/rules/BACKGROUND-RESOURCES.md>)）。
+- **Windows**：优先使用 Git Bash（bash 语法）执行终端命令，显式调用 `bash -lc "..."`（位于 `C:\Program Files\Git\bin\bash.exe`）。不要默认写 PowerShell/pwsh 语法，除非该操作只能由 PowerShell 完成或用户点名要求；必须用 PowerShell 时，一律用 pwsh 7（`pwsh`），不用 `powershell`（5.1），不要主动另起 cmd。
+- **macOS / Linux**：直接使用系统原生 `zsh` 或 `bash`（如 `bash -lc "..."` / `zsh -lc "..."`）。
+- **例外**：验证目标脚本（BAT/CMD/PowerShell/sh）时允许调用其实际解释器完成实跑；脱钩启动桌面 GUI 客户端或独立常驻程序时允许按平台使用 `Start-Process` / `cmd /c start "" <exe>`（Windows）或 `open -a` / `nohup ... >/dev/null 2>&1 &`（macOS / Linux，见 [BACKGROUND-RESOURCES.md](<file:///<YOUR_PATH>/.gemini/config/plugins/anyi-global-rules/rules/BACKGROUND-RESOURCES.md>)）。
 
 ## 多代理委派（Subagent 派工）
 

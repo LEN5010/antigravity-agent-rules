@@ -225,6 +225,7 @@ flowchart TD
 
 - 最快自检：`node mcp/dsh-crew/verify.mjs --offline`（不启动后端、不花 token）
 - 环境变量表、Antigravity 注册样例、凭据补丁占位机制与已知限制见各自目录的 README；两边的 README 顶部都标了来历与验证状态，**别把「未验证」当「已验证」用**。
+- 编排侧怎么用：`skills/multi-agent-orchestrator/SKILL.md` §4 里的 `<YOUR_HEADLESS_MCP>` 占位符，填这两座桥中的任一个即可，工具名对应关系写在该节表格里。
 
 
 ---

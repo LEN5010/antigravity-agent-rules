@@ -59,6 +59,16 @@ description: 当任务涉及多子代理（Subagents）分工、默认派 3.8f�
 | **`<YOUR_HEADLESS_MCP>`** | **Headless Agent**（独立子进程，不打断桌面 GUI） | `status` / `sessions` / `ask` / `forget` | 交由外部 Headless Agent 执行脚本检查、只读探测、文档处理或 `<YOUR_PROJECT_PATH>` 工作区任务。 |
 | **`<YOUR_GUI_MCP>`** | **外部桌面 GUI Agent**（Electron CDP 驱动 + Git 基线客观验收） | `query_info` / `run_task` / `wait_task` / `query_task` / `manage_task` / `verify_task` | 派发完整开发任务书给外部 GUI Agent，自动跑命令验收与失败返修闭环。 |
 
+这两个是**占位符**，填你实际的 MCP ServerName。本仓库自带两座零依赖桥，可直接用作 `<YOUR_HEADLESS_MCP>`：
+
+| 占位符 | 本仓库可填 | 工具名对应 | 验证状态 |
+| :--- | :--- | :--- | :--- |
+| `<YOUR_HEADLESS_MCP>` | [`mcp/dsh-crew`](../../mcp/dsh-crew/) | `dsh_status` / `dsh_sessions` / `dsh_ask` / `dsh_forget`（语义即上表 `status` / `sessions` / `ask` / `forget`） | 真机跑通 6/6，含续聊复用 session |
+| `<YOUR_HEADLESS_MCP>` | [`mcp/agent-bridge`](../../mcp/agent-bridge/) | `agent_status` / `agent_sessions` / `agent_ask` / `agent_forget`，后端由 `BRIDGE_CMD` 决定 | 假后端 32/32 协议断言，**未接真实后端** |
+| `<YOUR_GUI_MCP>` | 本仓库暂不提供 | — | — |
+
+注册写法见各目录 README。如果你不用外部 Agent，把本节连同 §4.1 / §4.2 一起删掉即可，不影响其余部分。
+
 ### 4.1 `<YOUR_HEADLESS_MCP>` 操作纪律
 1. **最小权限原则**：只读排查、状态探测一律显式传 `permission: "read-only"`；仅在授权修改工作区文件时传 `"workspace-write"`；跨目录授权施工才传 `"danger-full-access"`，且 `approval_policy` 默认保持 `"never"`。
 2. **会话标签卫生**：按任务语义命名 `session` 标签（以便多轮续聊同一上下文）；一次性探针或临时任务结束后，主动调用 `forget(session)` 清理映射。

@@ -1,6 +1,6 @@
 # dsh-crew — 把 DSH 智能体接进任意 MCP 客户端
 
-- 版本：0.1.0
+- 版本：0.1.1
 - 形态：MCP stdio server（JSON-RPC 2.0，按行分隔），单文件、零依赖 Node 脚本
 - 作用：让 Antigravity 等 MCP 客户端把任务派给本机 DSH（DeepSeek Harness）智能体，并拿回最终回答
 - 不需要 MCP SDK，不需要 npm install，本目录可直接进版本库
@@ -29,14 +29,25 @@
 
 复用官方一次性任务模式 `dsh --profile headless`：
 
-    dsh --profile headless --patch <凭据补丁> --json - \
+    dsh --profile headless --patch <凭据补丁> [--patch <模型补丁>] --json - \
         --permission-mode <档> --approval-policy never [--session-id <id>]
 
 - 任务经 **stdin** 传入 —— 绕开引号、换行、中文标点在 `cmd` 里被二次转义
-- `--json` 输出 NDJSON 事件流，桥只取最后的 `final` 事件作为回答
+- `--json` 输出 NDJSON 事件流，桥只取最后的 `final` 事件作为回答；用法错误时取 `error` 事件的 `message`
 - `--session-id` 延续同一段对话
 - `--patch <凭据补丁>` 让 headless 复用桌面端已保存的 API 凭据（headless 默认禁用托管凭据存储，不加会报 `MISSING_CREDENTIAL`）
+- `--patch <模型补丁>` 只在本机存在 `dsh-commandcode` 插件时追加，把默认模型切到 Command Code 的 `deepseek/deepseek-v4.1-flash-fast`；没有该插件时不传，沿用 DSH 自身的默认模型
 - **启动器级选项（`--profile` / `--patch`）必须排在 app 参数（`--json` 等）之前**，否则 headless 报 `unknown option '--patch'`
+- **dsh 版本要求**：headless 需要支持 `--json` / `--session-id` / `--permission-mode` / `--approval-policy`。实测 npm 版 `@deepseek-ai/dsh@0.2.2-rc.1` 支持，`0.1.5-rc.2` 不支持。`dsh_status` 的 `headless_cli` 项会用 `dsh --profile headless --help` 检查（不跑任务、不花 token）
+
+### 平台差异
+
+| | Windows | macOS / Linux |
+|---|---|---|
+| 启动器 | 桌面端 `resources/runtime/cli/bin/dsh.cmd`，或 npm 全局 `dsh.cmd` | 桌面端 `.app/Contents/Resources/runtime/cli/bin/dsh`，或 npm 全局 `dsh` |
+| 启动方式 | 经 `cmd.exe`（`.cmd` 必须走 shell），启动器路径和参数里带空格的都加引号 | 直接 exec，不经 shell，`/Applications/<产品名>.app` 这类带空格的路径不会被拆开 |
+| PATH | 原样继承，末尾追加当前 node 所在目录 | 同左。从 Dock 启动的 GUI 客户端 PATH 里通常没有 Homebrew 的 node，npm 版 `dsh` 的 `#!/usr/bin/env node` 需要这一步才能找到 node |
+| 插件 URL | `file:///C:/Users/...` | `file:///Users/...`（由 `pathToFileURL` 生成） |
 
 ## 3. 工具
 
@@ -44,7 +55,7 @@
 |---|---|
 | `dsh_ask` | 派任务给 DSH。参数：`task`（必填）、`session`（标签，默认 `default`）、`cwd`（默认桥进程当前目录）、`permission`（`read-only` / `workspace-write` / `danger-full-access`，默认 `workspace-write`）、`approval_policy`（默认 `never`）、`timeout_ms`（默认 15 分钟，范围 10s–60min） |
 | `dsh_sessions` | 列出已保存的 crew 会话（标签 / session_id / cwd / 次数 / 上次是否成功） |
-| `dsh_status` | 自检后端：启动器、asar、凭据补丁、工作目录、状态文件位置 |
+| `dsh_status` | 自检后端：启动器、headless 参数支持（会执行一次 `dsh --profile headless --help`，不花 token）、asar（仅参考）、凭据补丁（自检前先落盘）、模型补丁是否启用、工作目录、状态文件位置 |
 | `dsh_forget` | 忘记某个会话标签（只删映射，不动 DSH 会话数据） |
 
 返回文本固定含 `crew_session` / `session_id` / `cwd` / `permission` / `exit_code`；成功时附 `== DSH answer ==` 与 token 用量，失败时附 `== DSH error ==` 与 stderr 尾部。
@@ -53,7 +64,9 @@
 
 ```bash
 # 1) 确认 DSH 启动器能被找到（装法不同目录名不同，找不到就显式指定）
-export DSH_CREW_DSH_CMD="<DSH安装目录>/resources/runtime/cli/bin/dsh.cmd"
+export DSH_CREW_DSH_CMD="<DSH安装目录>/resources/runtime/cli/bin/dsh.cmd"   # Windows 桌面端
+# export DSH_CREW_DSH_CMD="/Applications/<产品名>.app/Contents/Resources/runtime/cli/bin/dsh"  # macOS 桌面端
+# 没装桌面端时也可以用 npm 版：npm i -g @deepseek-ai/dsh@0.2.2-rc.1（桥会在 PATH、/opt/homebrew/bin、/usr/local/bin 里找 dsh）
 
 # 2) 协议层自检，不启动 DSH、不花 token
 node verify.mjs --offline
@@ -81,8 +94,9 @@ node register-antigravity.mjs "D:/my/project"   # 参数可省略
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `DSH_CREW_DSH_CMD` | 自动探测 | DSH headless 启动器。探测范围：Windows `%LOCALAPPDATA%\Programs\*` 与 `C:\Program Files\*`，macOS `/Applications/*.app/Contents`，Linux `/opt/*`。都找不到就必须显式给 |
-| `DSH_CREW_DSH_ASAR` | 由启动器反推 | 只在 `dsh_status` 里做存在性检查，不影响运行 |
+| `DSH_CREW_DSH_CMD` | 自动探测 | DSH headless 启动器。先找桌面端：Windows `%LOCALAPPDATA%\Programs\*` 与 `C:\Program Files\*`，macOS `/Applications/*.app/Contents`，Linux `/opt/*`；再找 npm 全局安装的 `dsh`（PATH，非 Windows 另加 `/opt/homebrew/bin`、`/usr/local/bin`）。都找不到就必须显式给 |
+| `DSH_CREW_DSH_ASAR` | 由启动器反推 | 只在 `dsh_status` 里作参考信息，不影响运行，也不计入 `ready`（npm 安装没有 asar） |
+| `DSH_CREW_COMMANDCODE_PLUGIN` | `~/.dsh/profiles/desktop/node_modules/dsh-commandcode/index.js` | 该文件存在时才叠加 `crew-commandcode.patch.yml` |
 | `DSH_CREW_WORKSPACE` | 桥进程 cwd | `dsh_ask` 的默认工作目录 |
 | `DSH_CREW_CRED_PATCH` | `~/.dsh/dsh-crew/crew-credentials.patch.yml` | 凭据补丁生效位置（放无空格路径，避免 cmd 引号问题） |
 | `DSH_CREW_STATE_DIR` | `./state` | 标签 → session_id 映射存放处 |
@@ -90,8 +104,9 @@ node register-antigravity.mjs "D:/my/project"   # 参数可省略
 
 ## 6. 文件与状态
 
-- `dsh-crew.mjs`：桥本体，约 470 行
-- `crew-credentials.patch.yml`：凭据补丁源文件。里面的 `<YOUR_HOME>` 是占位符，桥每次派任务前会替换成本机家目录再落盘到 `DSH_CREW_CRED_PATCH`，所以这个文件可以直接进版本库
+- `dsh-crew.mjs`：桥本体，约 570 行
+- `crew-credentials.patch.yml`：凭据补丁源文件，只含官方文档里的三条开关，不含本机路径，桥每次派任务前原样落盘到 `DSH_CREW_CRED_PATCH`
+- `crew-commandcode.patch.yml`：可选的模型补丁。里面的 `<COMMANDCODE_PLUGIN_URL>` 是占位符，桥用 `pathToFileURL` 替换后落盘到 `DSH_CREW_CRED_PATCH` 同目录；插件不存在时不落盘也不传
 - `state/crew-state.json`：标签 → session_id 映射（桥自己维护，与 DSH 会话数据无关）
 - `verify.mjs`：协议层 / 端到端验收
 - `register-antigravity.mjs`：注册进 Antigravity 全局 MCP 配置，自动备份到 `./backups/`
@@ -104,6 +119,7 @@ node register-antigravity.mjs "D:/my/project"   # 参数可省略
 - 单轮超时默认 15 分钟，超时 SIGKILL 并返回 `TIMEOUT`。
 - headless 每轮冷启动一个进程（数秒），首轮输入 token 约 12k（工作区 `AGENTS.md` 等指令会加载）。
 - 只支持一次性任务（stdin 写完即关），不做常驻会话与并行 fan-out。
+- headless 的 `--session-id` 要求工作目录与该会话首次运行时一致。同一个 `session` 标签换了 `cwd` 再调用，headless 会拒绝续接并报错；换目录时请换一个标签。
 
 ## 8. 许可
 

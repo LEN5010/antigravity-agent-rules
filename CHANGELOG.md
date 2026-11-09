@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+- `mcp/dsh-crew` 0.1.1：修复 macOS 上的四处运行问题，Windows 行为保持不变。
+  - 非 Windows 平台改为直接 exec 启动器、不经 shell，`/Applications/<产品名>.app/...` 这类带空格的路径不再被拆开；Windows 仍经 `cmd.exe`，并给启动器路径本身加引号。
+  - 凭据补丁拆成两份：`crew-credentials.patch.yml` 只保留官方三条开关；Command Code 默认模型移到 `crew-commandcode.patch.yml`，仅在本机存在 `dsh-commandcode` 插件时叠加。插件 URL 改用 `pathToFileURL` 生成，修复 macOS 上拼出 `file:////Users/...` 导致插件加载失败的问题。
+  - 子进程 PATH 末尾追加当前 node 所在目录，修复 GUI 客户端启动时 npm 版 `dsh` 报 `env: node: No such file or directory`。
+  - 桌面端找不到时退回 PATH / `/opt/homebrew/bin` / `/usr/local/bin` 中的 npm 版 `dsh`。
+  - `dsh_status` 新增 `headless_cli` 检查（`--profile headless --help`，不花 token），自检前先落盘补丁；`dsh_asar` 改为参考信息，不再计入 `ready`。
+  - 解析 headless `--json` 流中的 `error` 事件；旧版 headless 不认识参数时给出升级提示。
+
 ## [1.1.0] - 2026-11-09
 
 - 新增跨端 MCP 双桥（`mcp/`）：

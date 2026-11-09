@@ -100,18 +100,18 @@ try {
         @{ rx = 'Remove-Item.*HKLM:';                                why = 'registry delete (HKLM)' },
         @{ rx = '(^|\s)reg\s+delete';                                why = 'reg delete' },
         @{ rx = 'Clear-Disk|Initialize-Disk';                        why = 'disk re-init' },
-        # --- VPN / proxy protection (user directive 2026-09-26: the VPN is
-        #     OFF-LIMITS without explicit per-task user approval) -----------
-        @{ rx = '(taskkill|tskill|pkill|killall|Stop-Process|wmic\s+process).{0,120}(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|netch|sstap|shadowsocks|trojan(-go)?|hysteria|naiveproxy|cfw|sysproxy|privoxy)'; why = 'kill VPN/proxy client (user rule: VPN off-limits without explicit user approval)' },
-        @{ rx = '(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|shadowsocks|hysteria).{0,120}(Stop-Process|taskkill|\.Kill\()'; why = 'kill VPN/proxy client (user rule: VPN off-limits without explicit user approval)' },
-        @{ rx = '(sc(\.exe)?\s+(stop|delete|config)|net(\.exe)?\s+stop|Stop-Service).{0,120}(clash|sing-?box|v2ray|xray|wintun|tap-windows|tun2socks|shadowsocks|verge|nekobox)'; why = 'stop/delete proxy service (user rule: VPN off-limits without explicit user approval)' },
+        # --- Proxy / network protection (user directive 2026-09-26: proxy/network
+        #     is OFF-LIMITS without explicit per-task user approval) -----------
+        @{ rx = '(taskkill|tskill|pkill|killall|Stop-Process|wmic\s+process).{0,120}(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|netch|sstap|shadowsocks|trojan(-go)?|hysteria|naiveproxy|cfw|sysproxy|privoxy)'; why = 'kill proxy client (user rule: proxy/network off-limits without explicit user approval)' },
+        @{ rx = '(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|shadowsocks|hysteria).{0,120}(Stop-Process|taskkill|\.Kill\()'; why = 'kill proxy client (user rule: proxy/network off-limits without explicit user approval)' },
+        @{ rx = '(sc(\.exe)?\s+(stop|delete|config)|net(\.exe)?\s+stop|Stop-Service).{0,120}(clash|sing-?box|v2ray|xray|wintun|tap-windows|tun2socks|shadowsocks|verge|nekobox)'; why = 'stop/delete proxy service (user rule: proxy/network off-limits without explicit user approval)' },
         @{ rx = 'netsh.{0,80}(interface\s+set\s+interface|wlan\s+disconnect)'; why = 'disable NIC / disconnect WLAN (user rule: network off-limits without explicit user approval)' },
-        @{ rx = 'Disable-NetAdapter';                                    why = 'disable network adapter (user rule: VPN off-limits without explicit user approval)' },
+        @{ rx = 'Disable-NetAdapter';                                    why = 'disable network adapter (user rule: proxy/network off-limits without explicit user approval)' },
         @{ rx = 'ipconfig\s+/release6?';                                 why = 'release IP, drops connectivity (user rule: network off-limits without explicit user approval)' },
-        @{ rx = 'rasdial\s+/d';                                          why = 'hang up dialup/VPN (user rule: VPN off-limits without explicit user approval)' },
-        @{ rx = '(^|\s)route\s+delete';                                  why = 'delete route, may break TUN (user rule: VPN off-limits without explicit user approval)' },
-        @{ rx = '(reg(\.exe)?\s+add|Set-ItemProperty|New-ItemProperty|regedit).{0,160}Internet\s+Settings'; why = 'modify system proxy registry (user rule: VPN off-limits without explicit user approval)' },
-        @{ rx = 'netsh\s+winhttp\s+set\s+proxy';                         why = 'set WinHTTP proxy (user rule: VPN off-limits without explicit user approval)' }
+        @{ rx = 'rasdial\s+/d';                                          why = 'hang up dialup/tunnel (user rule: proxy/network off-limits without explicit user approval)' },
+        @{ rx = '(^|\s)route\s+delete';                                  why = 'delete route, may break TUN (user rule: proxy/network off-limits without explicit user approval)' },
+        @{ rx = '(reg(\.exe)?\s+add|Set-ItemProperty|New-ItemProperty|regedit).{0,160}Internet\s+Settings'; why = 'modify system proxy registry (user rule: proxy/network off-limits without explicit user approval)' },
+        @{ rx = 'netsh\s+winhttp\s+set\s+proxy';                         why = 'set WinHTTP proxy (user rule: proxy/network off-limits without explicit user approval)' }
     )
 
     foreach ($r in $rules) {

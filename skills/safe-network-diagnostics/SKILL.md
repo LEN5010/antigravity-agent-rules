@@ -1,15 +1,15 @@
 ---
 name: safe-network-diagnostics
-description: 当任务涉及网络连通性排查、代理/梯子（VPN/Clash/Mihomo/Sing-box等）状态检查、DNS解析测试、端口探测或接口请求报错诊断时使用。固化用户代理严格只读红线与安全只读诊断命令规范。
+description: 当任务涉及网络连通性排查、本地代理客户端状态检查、DNS解析测试、端口探测或接口请求报错诊断时使用。固化用户代理严格只读红线与安全只读诊断命令规范。
 ---
 
 # 安全网络与代理只读诊断规范（safe-network-diagnostics）
 
-> 权威来源：继承自 [`~/.gemini/GEMINI.md`](file:///<YOUR_PATH>/.gemini/GEMINI.md)「用户梯子（VPN/代理）：未经许可一律只读」全局红线。命令行底层硬拦截位于 [`~/.gemini/config/scripts/pretool_guard.ps1`](file:///<YOUR_PATH>/.gemini/config/scripts/pretool_guard.ps1)。
+> 权威来源：继承自 [`~/.gemini/GEMINI.md`](file:///<YOUR_PATH>/.gemini/GEMINI.md)「用户代理与网络配置：未经许可一律只读」全局红线。命令行底层硬拦截位于 [`~/.gemini/config/scripts/pretool_guard.ps1`](file:///<YOUR_PATH>/.gemini/config/scripts/pretool_guard.ps1)。
 
 ## 1. 绝对红线：未经当次明确许可，严禁任何写/停操作
 
-未经用户**当次明确许可**，严禁执行任何停止、禁用、重启、卸载用户梯子/代理或更改网络配置的操作，包括但不限于：
+未经用户**当次明确许可**，严禁执行任何停止、禁用、重启、卸载用户代理或更改网络配置的操作，包括但不限于：
 
 1. **严禁结束代理客户端进程**：
    - 严禁使用 `taskkill` / `pkill` / `Stop-Process` / `wmic` 针对以下目标：`clash`、`verge`、`mihomo`、`sing-box`、`v2ray`、`xray`、`neko`、`shadowsocks`、`hysteria` 等一切代理核心与 GUI 进程。

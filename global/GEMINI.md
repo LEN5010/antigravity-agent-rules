@@ -12,9 +12,9 @@
 - **默认署名（Default Pen Name）**：所有文学创作、电子书、脚本、文档及公开交付物，默认统一使用固定笔名 **「安钰」**（不便署名的场景可留空或用「佚名」）。若正式或法律文件确需使用真实姓名，必须先明确询问并获用户批准。
 - **路径脱敏（Path Sanitization）**：严禁在生成的文件、代码、配置、导出日志或验证报告中硬编码或暴露含系统用户名的本机绝对路径；代码与脚本一律使用相对路径或环境变量/API（如 `os.homedir()`、`process.env.LOCALAPPDATA`、`$HOME`、`%USERPROFILE%`），报告与文本展示统一用相对路径或 `~` 脱敏（仅限当前聊天内供 IDE 点击跳转的 `file://` 链接与工具调用参数按系统要求使用实际路径，绝不写入交付物）。
 
-## 用户梯子（VPN/代理）：未经许可一律只读
+## 用户代理与网络配置：未经许可一律只读
 
-- 未经用户当次明确许可，**严禁执行任何停止、禁用、重启、卸载用户梯子/代理或修改网络配置的操作**：
+- 未经用户当次明确许可，**严禁执行任何停止、禁用、重启、卸载用户代理或修改网络配置的操作**：
   - 严禁结束代理进程（`clash`、`verge`、`mihomo`、`sing-box`、`v2ray`、`xray`、`neko`、`shadowsocks`、`hysteria` 等）或停止相关 Windows 服务；
   - 严禁断开网卡/路由（`netsh wlan disconnect`、`Disable-NetAdapter`、`ipconfig /release`、`route delete`）或修改系统代理（`Internet Settings` 注册表、`netsh winhttp set proxy`）。
 - 网络排查一律只用只读命令（`curl` 仅限 GET/HEAD；细则与标准排查 SOP 见 `safe-network-diagnostics` Skill；底层硬拦截见 `~/.gemini/config/scripts/pretool_guard.ps1`）。确需改动代理/网络配置时，先向用户说明原因与影响，等明确批准后再动或请用户自行执行。

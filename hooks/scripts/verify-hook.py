@@ -116,9 +116,9 @@ def main():
 
     print()
     print("=" * 78)
-    print("SECTION 3  VPN / proxy / network protection (rules lines 105-114)")
+    print("SECTION 3  proxy / network protection (rules lines 105-114)")
     print("=" * 78)
-    vpn_deny_cases = [
+    proxy_deny_cases = [
         ("kill proxy (taskkill mihomo)", "taskkill /F /IM mihomo.exe"),
         ("kill proxy (Stop-Process clash)", "Stop-Process -Name clash-verge -Force"),
         ("kill proxy (pipeline Stop-Process)", "Get-Process sing-box | Stop-Process -Force"),
@@ -127,21 +127,21 @@ def main():
         ("disconnect WLAN (netsh)", "netsh wlan disconnect"),
         ("disable NIC (Disable-NetAdapter)", "Disable-NetAdapter -Name 'WLAN' -Confirm:$false"),
         ("release IP (ipconfig /release)", "ipconfig /release"),
-        ("hang up VPN (rasdial /d)", "rasdial /d"),
+        ("hang up dial-up/tunnel (rasdial /d)", "rasdial /d"),
         ("delete route (route delete)", "route delete 0.0.0.0"),
         ("modify proxy reg (reg add)", r'reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f'),
         ("modify proxy reg (Set-ItemProperty)", r'Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" -Name ProxyEnable -Value 0'),
         ("set WinHTTP proxy (netsh winhttp)", "netsh winhttp set proxy 127.0.0.1:7890"),
     ]
-    for idx, (label, cmd) in enumerate(vpn_deny_cases):
+    for idx, (label, cmd) in enumerate(proxy_deny_cases):
         check(label, cmd, "deny", conversation="s3-deny-%d" % idx)
 
-    vpn_allow_cases = [
+    proxy_allow_cases = [
         ("read-only proxy process check", "Get-Process clash,mihomo,sing-box -ErrorAction SilentlyContinue"),
         ("read-only proxy registry query", r'reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable'),
         ("read-only HTTP HEAD probe", "curl.exe -I -s -m 5 https://example.com"),
     ]
-    for idx, (label, cmd) in enumerate(vpn_allow_cases):
+    for idx, (label, cmd) in enumerate(proxy_allow_cases):
         check(label, cmd, "allow", conversation="s3-allow-%d" % idx)
 
     print()

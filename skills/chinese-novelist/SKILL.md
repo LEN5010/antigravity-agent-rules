@@ -1,9 +1,13 @@
 ---
 name: chinese-novelist
 description: 分章节创作中文中长篇小说（10–50 章），覆盖立项问答、大纲规划、逐章写作、续写未完成的小说项目和全书校验。用户要求写小说、写连载故事或继续之前的小说项目时使用。单篇短故事或润色已有文本不用本 Skill，改用 lieflat-less-ai-tone。
+metadata:
+  source: 基于 PenglongHuang/chinese-novelist-skill (MIT License, Copyright (c) 2026 PenglongHuang) 针对 Antigravity 全局规则与流式写入机制做本地衔接修订
 ---
 
 # 中文小说创作
+
+> **上游致谢与引用声明**：本 Skill 基于开源项目 [PenglongHuang/chinese-novelist-skill](https://github.com/PenglongHuang/chinese-novelist-skill)（作者：`PenglongHuang`，[MIT License](./LICENSE)）构建；本文件为适配 Antigravity 全局规则与 `BidiGenerateContent` 流式工具调用特性的衔接入口，完整阶段流程（`references/`）与字数统计脚本（`scripts/`）归属原项目，获取方式见 [`UPSTREAM.md`](./UPSTREAM.md)。
 
 ## 写作原则
 
@@ -18,6 +22,7 @@ description: 分章节创作中文中长篇小说（10–50 章），覆盖立�
 - 第三、四阶段不向用户提问，但按全局 §4A 汇报进度：每完成一批章节（默认 5 章）报一句进度，汇报不暂停写作。
 - 重写已完成章节属于覆盖已有成果。第二阶段确认时一并取得授权；重写前把原稿存到 `chapters/_prev/`。
 - 去 AI 味：每章写完后按 lieflat-less-ai-tone 的规则自检，文学体裁豁免照常适用。不对全书做二次改写。
+- **防断流分块落盘（Antigravity `BidiGenerateContent` 整包缓冲规避）**：Antigravity 客户端的 `BidiGenerateContent` 流在服务端生成 `write_file` 工具 JSON 参数时采用整包缓冲（参数全部生成完毕前流处于 0 字节静默），单次写入超过 ~2,500 字极易因后台缓冲超过 90~120 秒而触发流静默中断（`The stream was interrupted` / `stream idle timeout`）。撰写每章正文（3,000–5,000+ 字）时，**严禁单次 `write_file` 一次性写入整章**；必须按场景分 **2–3 段** 落盘（首段用 `write_file` 创建章节文件，后续段落用 `write_file` + `Append: true` 依次追加，**每次调用的 `Content` 严格控制在 1,500–2,000 字以内**）。
 
 ## 流程
 
@@ -44,7 +49,7 @@ description: 分章节创作中文中长篇小说（10–50 章），覆盖立�
 ### 3 写作
 
 - 模式：默认 `serial`，主 Agent 逐章写。`parallel` 只在运行环境能派生写作子代理时可选。
-- 每章流程：读本章大纲、`03-连续性记录.md` 和上一章结尾约 500 字 → 写作 → 字数检查 → 去 AI 味自检 → 更新 `02-写作计划.json` 中的章节状态 → 在 `03-连续性记录.md` 追加本章摘要（≤150 字）、新埋的伏笔、已回收的伏笔和人物状态变化。
+- 每章流程：读本章大纲、`03-连续性记录.md` 和上一章结尾约 500 字 → **按场景分 2–3 段调用 `write_file`（首段新建、后续 `Append: true`，单次 ≤ 2,000 字）完成本章写作** → 字数检查 → 去 AI 味自检 → 更新 `02-写作计划.json` 中的章节状态 → 在 `03-连续性记录.md` 追加本章摘要（≤150 字）、新埋的伏笔、已回收的伏笔和人物状态变化。
 
 → [phase3-writing.md](references/flows/phase3-writing.md)
 

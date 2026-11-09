@@ -56,6 +56,9 @@ ping -n 3 <host>
 netsh interface ip show config
 ```
 
+### 2.5 鉴别大体积工具调用导致的“假性流中断”
+若报错为 `The stream was interrupted` 或 `stream idle timeout`，排查网络前先检查上一步是否正在发起大体积 `write_file`（如单次写入 >2,500 字的长篇小说、大文档或大文件）。Antigravity 的 `BidiGenerateContent` 流在服务端生成 Tool Call JSON 参数时采用整包缓冲，参数全部拼装完成前流处于 0 字节静默；当单次写入过大导致后台缓冲耗时超过 90~120s 时，会被网关或客户端空闲超时直接掐断——**这属于单次工具输出块过大，并非用户代理或网络故障**。遇到此类情况直接改用 `write_file` + `Append: true` 分块（单次 ≤1,500–2,000 字）写入即可，无需探测或重启代理。
+
 ---
 
 ## 3. 确需变更时的唯一合规路径

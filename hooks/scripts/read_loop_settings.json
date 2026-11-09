@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "mode": "observe",
+  "repeatLimit": 3,
+  "nativeCoverageVerified": false,
+  "rangeOutputVerified": false,
+  "permissionPolicyVerified": false
+}

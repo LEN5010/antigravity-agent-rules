@@ -1,0 +1,16 @@
+Remove-Item C:\temp\x -Recurse -Force
+Remove-Item -Path C:\temp -Force -Recurse
+rm -rf /tmp/x
+rm -r -f /tmp/x
+rm --recursive --force /tmp/x
+rm -r -fo C:\temp\x
+ri -r -fo C:\temp\x
+rd /s /q C:\foo
+del /f /s /q C:\foo\*
+git clean -fd
+Format-Volume -DriveLetter D
+git push origin main --force
+Remove-Item HKLM:\Software\Foo
+Get-ChildItem C:\ | Select-Object Name
+node build.mjs
+npm test

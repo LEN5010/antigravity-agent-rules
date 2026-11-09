@@ -1,0 +1,5 @@
+{
+  "name": "docx-delivery",
+  "version": "1.0.0",
+  "description": "Markdown/文本 → Word(.docx) 成品交付：两条实战验证的转换链（纯标准库无图版 / python-docx 带图版）+ 只读验证器。任务要求交付 Word 报告时按需加载。"
+}

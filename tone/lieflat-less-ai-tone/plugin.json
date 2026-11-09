@@ -1,0 +1,10 @@
+{
+  "name": "lieflat-less-ai-tone",
+  "version": "1.0.0",
+  "description": "基于 283 万字语料统计的去 AI 味与自然中文写作技能（写文字与成稿润色专用）",
+  "author": {
+    "name": "larashero3-dotcom"
+  },
+  "repository": "https://github.com/larashero3-dotcom/lieflat-less-ai-tone",
+  "license": "MIT"
+}

@@ -1,0 +1,5 @@
+hook_log.jsonl
+hook_log.jsonl.1
+state/
+scratch/
+__pycache__/

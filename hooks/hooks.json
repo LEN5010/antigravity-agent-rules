@@ -1,0 +1,46 @@
+{
+  "hard-gate": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/pretool_guard.ps1",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
+  "read-loop-efficiency": {
+    "enabled": true,
+    "PostToolUse": [
+      {
+        "matcher": "run_command|view_file|view_code_item|grep_search|write_to_file|replace_file_content|multi_replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/read_loop_guard.cjs post",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  },
+  "read-loop-enforcement": {
+    "enabled": false,
+    "PreToolUse": [
+      {
+        "matcher": "view_file|view_code_item|grep_search",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./scripts/read_loop_guard.cjs pre",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

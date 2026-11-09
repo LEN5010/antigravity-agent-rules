@@ -1,6 +1,6 @@
 # Antigravity Agent Rules
 
-这是一套给 Google Antigravity IDE（反重力桌面端）和 Gemini CLI 用的 Agent 分层规则、底层命令拦截 Hook、去 AI 味文风与按需 Skill 配置。
+这是一套给 Google Antigravity 桌面端（IDE / 2.0）& agy CLI 用的 Agent 分层规则、底层命令拦截 Hook、去 AI 味文风与按需 Skill 配置。
 
 重度用 Agent 写代码或排障时，常会遇到它自作主张闯祸：诊断网络报错时顺手误杀本地代理软件、停掉 TUN 虚拟网卡服务或篡改系统代理注册表导致直接断网，或者误执行 `rm -rf`、`git reset --hard` 把未提交的代码抹掉。光在提示词里写“不许删文件、不许动代理”并不稳，上下文一长模型就会忘。这套配置把高危命令放到进程级 Hook 里硬拦，再把常驻规则、专项规则、文风和执行协议按层拆开按需加载。
 

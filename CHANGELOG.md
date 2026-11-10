@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.2.1] - 2026-11-10
+
+- **新增工具调用前思考可见性常驻规则（`global/THINKING-VISIBILITY.md`）**：
+  - 新增 `trigger: always_on` 规则文件 `global/THINKING-VISIBILITY.md`：要求每次发起工具调用或连续执行多步操作前，先用 1–2 句简练文字说明当前的分析判断、调用原因及预期验证问题，禁止静默连续调用工具。
+  - 双端安装器（`install.ps1` 与 `hooks/unix/hooks-installer.mjs`）已同步接入，全量安装时自动部署至 `~/.gemini/config/plugins/anyi-global-rules/rules/THINKING-VISIBILITY.md`（亦可单独复制至 `~/.gemini/antigravity/rules/` 或工作区 `.agents/rules/` 独立使用）。
+- **完善 README 边界与合规声明**：
+  - 明确说明 `pretool_guard.ps1` / `pretool_guard.cjs` 对未命中黑名单命令默认返回 `{"decision":"allow"}` 的放行边界（适配 Turbo / Eager 模式，Ask-First 手动审批用户请勿原样启用该分支）。
+  - 补充第三方开源 Skill 上游协议归属细节（含 `lieflat-less-ai-tone` V1 MIT 提交哈希与上游后续协议变更提示）及底部非官方社区项目免责声明。
+
 ## [1.2.0] - 2026-11-10
 
 - **macOS / Linux 全量 5 层一键安装与跨平台规则补齐**：

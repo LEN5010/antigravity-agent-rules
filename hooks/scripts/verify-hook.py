@@ -187,6 +187,26 @@ def main():
         ("python -c shutil.rmtree", 'python -c "import shutil; shutil.rmtree(\'build\')"'),
         ("node -e fs.rmSync", 'node -e "fs.rmSync(\'build\', {recursive:true})"'),
         ("grep followed by && rm -rf", 'grep -rn "rm -rf" scripts/ && rm -rf build --token sk-secret1234567890'),
+        # Path-prefixed executables are the same commands.
+        ("/bin/rm -rf (absolute path)", "/bin/rm -rf src"),
+        ("\\rm -rf (alias bypass)", "\\rm -rf src"),
+        ("/usr/bin/git reset --hard", "/usr/bin/git reset --hard"),
+        ("quoted git.exe path reset --hard", '& "C:\\Program Files\\Git\\cmd\\git.exe" reset --hard'),
+        # Printed text that is piped into a shell, or re-read through substitution, is code.
+        ("echo ... | sh", "echo 'rm -rf src' | sh"),
+        ("printf ... | sudo bash", "printf 'git reset --hard' | sudo bash"),
+        ("eval of echoed text", "eval \"$(echo 'rm -rf src')\""),
+        # Whole-tree / whole-directory discards and their neighbours.
+        ("git checkout . (no --)", "git checkout ."),
+        ("git checkout -- src/", "git checkout -- src/"),
+        ("git restore src/", "git restore src/"),
+        ("git restore -s HEAD~1 . (source, not staged)", "git restore -s HEAD~1 ."),
+        ("git stash clear", "git stash clear"),
+        ("git switch --discard-changes", "git switch --discard-changes main"),
+        ("git rm -rf", "git rm -rf src"),
+        ("find -exec /bin/rm", "find build -type d -exec /bin/rm -rf {} +"),
+        ("bare rmtree import", 'python -c "from shutil import rmtree; rmtree(\'src\')"'),
+        ("require(fs).rmSync recursive", "node -e \"require('fs').rmSync('src',{recursive:true})\""),
     ]
     for idx, (label, cmd) in enumerate(edge_deny_cases):
         check(label, cmd, "deny", conversation="s4-deny-%d" % idx)
@@ -196,6 +216,18 @@ def main():
         ("git commit -m with rm -rf", 'git commit -m "fix rm -rf and git reset --hard regex"'),
         ("git push --force-with-lease", "git push --force-with-lease origin main"),
         ("git restore --staged . (safe unstage)", "git restore --staged ."),
+        ("git restore --staged src/", "git restore --staged src/"),
+        ("git clean dry run", "git clean -n -d"),
+        ("git clean --dry-run -fd", "git clean --dry-run -fd"),
+        ("git rm -r --cached (untrack only)", "git rm -r --cached node_modules"),
+        ("pnpm rm -r (dependency, not files)", "pnpm rm -r lodash"),
+        ("docker rm (container)", "docker container rm -f web"),
+        ("git checkout single file", "git checkout -- src/a.ts"),
+        ("git push --force-if-includes", "git push --force-with-lease --force-if-includes origin main"),
+        ("interpreter single-file delete", 'python -c "import os; os.remove(\'tmp.txt\')"'),
+        ("sed script mentioning rm -rf", 'sed -i "s/rm -rf/trash/" clean.sh'),
+        ("echo text to a file", "echo 'rm -rf src' > notes.txt"),
+        ("echo text piped to tee", "echo 'git reset --hard' | tee -a notes.txt"),
         ("repeat benign build #1", "npm run build"),
         ("repeat read-only ls #1", "ls -la"),
     ]

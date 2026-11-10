@@ -46,24 +46,39 @@ const LOG_ALL = /^(1|true|yes)$/i.test(process.env.AGY_HOOK_LOG_ALL || '');
 const PROXY_RULE = 'user rule: proxy/network off-limits without explicit user approval';
 const NETWORK_RULE = 'user rule: network off-limits without explicit user approval';
 
+// Command boundary: start of line, whitespace, a separator, a quote, or a path
+// separator. The path separator matters: /bin/rm, \rm and C:\...\git.exe are
+// the same commands as rm and git and must not slip past the rules.
+const B = '(^|[\\s;&|("\'`\\\\/])';
+
 // Git prefix allowing global options (-C <dir>, -c <k=v>, --git-dir=..., --work-tree=..., etc.)
-const GIT_PREFIX = '(^|[\\s;&|("\'`])git(\\.exe)?\\s+(?:-[Cc]\\s+\\S+\\s+|--(?:git-dir|work-tree|namespace|super-prefix|exec-path)(?:=\\S+|\\s+\\S+)\\s+|--(?:bare|no-pager|no-replace-objects|literal-pathspecs)\\s+)*';
+// and a closing quote after a quoted executable path ("C:\Program Files\Git\cmd\git.exe" reset ...).
+const GIT_PREFIX = B + 'git(\\.exe)?["\']?\\s+(?:-[Cc]\\s+\\S+\\s+|--(?:git-dir|work-tree|namespace|super-prefix|exec-path)(?:=\\S+|\\s+\\S+)\\s+|--(?:bare|no-pager|no-replace-objects|literal-pathspecs)\\s+)*';
 
 // Mirrors pretool_guard.ps1 rules one-to-one.
 const WINDOWS_RULES = [
   ['Remove-Item\\b[^;&|\\r\\n]*\\s-(r|recurse)\\b', 'recursive delete (Remove-Item -Recurse)'],
   ['(^|[^a-zA-Z0-9_-])(Remove-Item|ri|rm|del|erase|rd|rmdir)\\b[^;&|\\r\\n]*(\\s-(r|recurse)\\b)', 'recursive delete (PS alias/short-param)'],
-  ['(^|[\\s;&|("\'`])rm\\s+(-[a-zA-Z]*[rR]|--recursive\\b|[^;&|\\r\\n]*\\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\\b)', 'rm -r / --recursive'],
-  ['(^|[\\s;&|("\'`])find\\b[^;&|\\r\\n]*\\s(-delete\\b|-exec(dir)?\\s+(rm|rmdir)\\b)', 'find -delete / -exec rm'],
-  ['(^|[\\s;&|("\'`])(python3?|node|nodejs|perl|ruby)(\\.exe)?\\b[^\\r\\n]*\\b(shutil\\.rmtree|os\\.(remove|unlink|rmdir|removedirs)|fs\\.(rmSync|rmdirSync|unlinkSync)|FileUtils\\.(rm_rf|remove_dir)|remove_tree)\\b', 'interpreter one-liner destructive delete'],
+  [B + 'rm(\\.exe)?\\s+(-[a-zA-Z]*[rR]|--recursive\\b|[^;&|\\r\\n]*\\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\\b)', 'rm -r / --recursive'],
+  [B + 'find\\b[^;&|\\r\\n]*\\s(-delete\\b|-exec(dir)?\\s+(\\S*[\\\\/])?(rm|rmdir)\\b)', 'find -delete / -exec rm'],
+  // Tree deletes only. Deleting one file from an interpreter is no more dangerous than `rm file`, which is not flagged.
+  [B + '(python3?|py|node|nodejs|deno|bun|perl|ruby)(\\.exe)?\\b[^\\r\\n]*(\\brmtree\\s*\\(|\\bremovedirs\\s*\\(|\\b(rmSync|rmdirSync|rm|rmdir)\\s*\\([^)]*\\brecursive\\b|\\brm_rf\\b|\\brm_r\\b|\\bremove_tree\\b|\\bremove_dir\\b|\\brimraf\\b)', 'interpreter one-liner recursive delete'],
   ['(^|\\s)rd\\s+/s', 'rd /s'],
   ['(^|\\s)rmdir\\s+/s', 'rmdir /s'],
   ['(^|\\s)del\\s+/[a-zA-Z]*[fs]', 'del /f /s'],
   [GIT_PREFIX + 'reset\\b[^;&|\\r\\n]*\\s--hard\\b', 'git reset --hard'],
   [GIT_PREFIX + 'push\\b[^;&|\\r\\n]*(\\s--force(?![-a-zA-Z])|\\s-[a-zA-Z]*f\\b|\\s\\+[a-zA-Z0-9_./-]+)', 'git push --force / +refspec'],
-  [GIT_PREFIX + 'clean\\b[^;&|\\r\\n]*\\s(-[a-zA-Z]*[fd]|--force\\b)', 'git clean -fd'],
-  [GIT_PREFIX + 'checkout\\b[^;&|\\r\\n]*(\\s--\\s*(\\.|\\*)(\\s|$)|\\s(-f|--force)\\b)', 'git checkout -- . / --force'],
-  [GIT_PREFIX + 'restore\\b(?![^;&|\\r\\n]*\\s(-S|--staged)\\b(?![^;&|\\r\\n]*\\s(-W|--worktree)\\b))[^;&|\\r\\n]*(\\s(\\.|\\*)(\\s|$)|\\s(-W|--worktree)\\b)', 'git restore working tree'],
+  // A dry run (-n / --dry-run) deletes nothing and is the safe way to preview, so it is not flagged.
+  [GIT_PREFIX + 'clean\\b(?![^;&|\\r\\n]*\\s(-[a-zA-Z]*n[a-zA-Z]*|--dry-run)\\b)[^;&|\\r\\n]*\\s(-[a-zA-Z]*[fd]|--force\\b)', 'git clean -fd'],
+  // Whole-tree or whole-directory discards, with or without "--". Single-file checkouts stay unflagged.
+  [GIT_PREFIX + 'checkout\\b[^;&|\\r\\n]*(\\s(-f|--force)\\b|\\s(--\\s*)?(\\.|\\*|:/)(?=\\s|$)|\\s[^\\s;&|-][^\\s;&|]*[\\\\/](?=\\s|$))', 'git checkout . / <dir>/ / --force'],
+  // Matching is case-insensitive, so "-S" (--staged) cannot be told apart from "-s" (--source).
+  // Only the long --staged form is treated as the safe unstage-only case.
+  [GIT_PREFIX + 'restore\\b(?![^;&|\\r\\n]*\\s--staged\\b(?![^;&|\\r\\n]*\\s(-W|--worktree)\\b))[^;&|\\r\\n]*(\\s(\\.|\\*|:/)(?=\\s|$)|\\s(-W|--worktree)\\b|\\s[^\\s;&|-][^\\s;&|]*[\\\\/](?=\\s|$))', 'git restore working tree'],
+  [GIT_PREFIX + 'stash\\s+(drop|clear)\\b', 'git stash drop / clear'],
+  [GIT_PREFIX + 'switch\\b[^;&|\\r\\n]*\\s(--discard-changes|-f|--force)\\b', 'git switch --discard-changes'],
+  // SUBCMD_RM is what maskDataQuotes() leaves in place of `git rm`. Forced removal outside --cached drops uncommitted edits.
+  [GIT_PREFIX + 'SUBCMD_RM\\b(?![^;&|\\r\\n]*\\s--cached\\b)[^;&|\\r\\n]*\\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\\b', 'git rm --force'],
   ['Format-Volume', 'Format-Volume'],
   ['(^|\\s)format\\s+[a-zA-Z]:', 'format drive'],
   ['Remove-Item.*HKLM:', 'registry delete (HKLM)'],
@@ -115,11 +130,33 @@ function stripSegmentQuotes(seg) {
     .replace(/"(?:\\.|[^"$`\\])*"/g, '""');
 }
 
+// A masked segment must end the command, end at ; & || or a newline, or be piped
+// into something that is not a shell or interpreter. `echo 'rm -rf src' | sh`
+// runs the quoted text, so its quotes are code, not data, and stay visible.
+const PIPE_GUARD = '(?=$|[;&\\r\\n]|\\|\\||\\|(?!\\s*(?:sudo\\s+)?(?:sh|bash|zsh|dash|ksh|fish|pwsh|powershell|cmd|iex|Invoke-Expression|xargs|eval|source|python3?|node|perl|ruby)\\b))';
+// Search tools: the quoted argument is a pattern. awk is left out on purpose (its program can call system()).
+const MASK_SEARCH = '(^|[\\s;&|(])(grep|egrep|fgrep|rg|ripgrep|ag|ack|sed|Select-String)\\b[^;&|\\r\\n]*' + PIPE_GUARD;
+// Print commands: the quoted argument is the output, which is only data when nothing re-reads it as code.
+const MASK_PRINT = '(^|[\\s;&|(])(echo|printf|Write-Host|Write-Output)\\b[^;&|\\r\\n]*' + PIPE_GUARD;
+// If the command line uses command substitution or eval anywhere, printed text may be executed: do not mask it.
+const SUBSTITUTION = '\\$\\(|`|\\beval\\b|<\\(';
+const MASK_GIT_MSG = B + 'git(\\.exe)?\\b[^;&|\\r\\n]*\\b(commit|tag|notes|merge)\\b[^;&|\\r\\n]*';
+// `rm` as a subcommand (git rm, pnpm rm, docker rm, ...) is not the filesystem rm.
+const SUBCMD_GIT = GIT_PREFIX + 'rm\\b';
+const SUBCMD_PM = '(' + B + '(?:pnpm|npm|yarn|bun|cargo|brew)(?:\\.exe|\\.cmd)?(?:\\s+-\\S+)*\\s+)rm\\b';
+const SUBCMD_DOCKER = '(' + B + '(?:docker|podman)(?:\\.exe)?(?:\\s+-\\S+)*(?:\\s+(?:container|image|volume|network|compose|secret|config|context))?\\s+)rm\\b';
+
 function maskDataQuotes(cmd) {
   if (!cmd) return '';
   let out = cmd;
-  out = out.replace(/(^|[\s;&|(])(grep|egrep|fgrep|rg|ripgrep|ag|ack|Select-String|echo|printf|Write-Host|Write-Output)\b[^;&|\r\n]*/gi, stripSegmentQuotes);
-  out = out.replace(/(^|[\s;&|(])git(\.exe)?\b[^;&|\r\n]*\b(commit|tag|notes|merge)\b[^;&|\r\n]*/gi, stripSegmentQuotes);
+  out = out.replace(new RegExp(MASK_SEARCH, 'gi'), stripSegmentQuotes);
+  if (!new RegExp(SUBSTITUTION, 'i').test(cmd)) {
+    out = out.replace(new RegExp(MASK_PRINT, 'gi'), stripSegmentQuotes);
+  }
+  out = out.replace(new RegExp(MASK_GIT_MSG, 'gi'), stripSegmentQuotes);
+  out = out.replace(new RegExp(SUBCMD_GIT, 'gi'), (m) => m.slice(0, -2) + 'SUBCMD_RM');
+  out = out.replace(new RegExp(SUBCMD_PM, 'gi'), '$1SUBCMD_RM');
+  out = out.replace(new RegExp(SUBCMD_DOCKER, 'gi'), '$1SUBCMD_RM');
   return out;
 }
 

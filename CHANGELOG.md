@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.3] - 2026-11-11
+
+- **放宽隔离工作树（`branch` / `share`）批量改动拦截**：
+  - 更新 `global/AGENTS.md`（§1 动作分级）与 `skills/multi-agent-orchestrator/SKILL.md`（§2.1）：明确主工作树单次修改 ≥5 个文件属于“先问再动”，但当子代理或 `/swarm` Worker 运行在 `branch` / `share` 隔离 Git worktree 且尚未合入主分支时，允许在授权写入白名单内直接执行批量修改，统一留在 Adversarial Verifier 终审与合入主分支前由用户一次性拍板。
+- **按运行模式豁免思考可见性前置播报**：
+  - 更新 `global/THINKING-VISIBILITY.md` 与 `agents/flash-verifier.md`：区分主会话交互与后台并行执行——主会话直面用户时保留每次工具调用前 1–2 句前置判断；对 `/swarm` 并行执行 worker、`flash-verifier`、`research` 等后台子代理免除逐次工具前置播报，直接静默执行工具链，降低高单价模型输出开销与看板噪音。
+- **补齐并发度与本地资源硬上限 + `read_loop_guard.cjs` 升级与并行评估**：
+  - 更新 `skills/multi-agent-orchestrator/SKILL.md`（§2.1）与 `rules/BACKGROUND-RESOURCES.md`：新增单次任务活跃施工子代理并发上限（≤2–3 个，总活跃子代理 ≤3–4 个）及本机重型编译/打包/渲染/全量测试子进程并发硬上限（≤1–2 个，共享产物目录/端口/锁时强制 `max=1` 串行化），防止 `Gemini 4 Carbon` 在重型并行任务上吃满本机 CPU 与内存。
+  - 更新 `hooks/hooks.json` 与 `hooks/scripts/read_loop_guard.cjs`：补齐对 Antigravity 2.0 原生工具名（`read_file` / `edit_file` / `write_file`）、省略 `EndLine` 的整文件读取检测及 `read_loop_log.jsonl` 5 MB 自动轮转（`.1`）的支持；经评估 `/swarm` 看板唤醒的 transcript epoch 边界、同会话并发锁竞争（`STATE_BUSY`）及 Ask-First 模式下的 `PreToolUse` `allow` 副作用，`read_loop_settings.json` 继续保持 `"mode": "observe"`（`enforce` 维持 `NOT_PROVEN`）。
+- **新增对外文档交付润色串联与前端 UI 密度约束**：
+  - 更新 `skills/docx-delivery/skills/docx-delivery/SKILL.md`：区分“既有文本原样转换”与“Agent（如 `Gemini 4 Carbon`）撰稿的对外客户文档交付”，后者在转出终版 `.docx` 前默认串联 `humanizer-zh`（或交由 `Gemini 4 Argon` 终审润色），定稿后再跑转换与 `validate_docx.py` 校验。
+  - 更新 `rules/IMPLEMENTATION.md`：新增「前端与 UI 交付密度约束」，限制单个视图内视觉容器嵌套层级 ≤3 层、单行并列卡片 ≤3–4 个、单卡核心指标 ≤3 项，次要诊断参数与长日志默认折叠或下沉至二级详情抽屉。
+
 ## [1.2.2] - 2026-11-11
 
 - **针对 Gemini 4 Carbon（4c）与 `/swarm` 并行编排的增量适配（`global/` 常驻层零改动）**：

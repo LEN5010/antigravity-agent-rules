@@ -33,17 +33,23 @@ description: 当任务涉及多子代理（Subagents）分工、/swarm（或 /te
 > **纪律**：
 > - 日常高频扫描、只读验证和检索脏活优先走 `flash`（3.8f）子代理（如 `flash-verifier`）；需要主模型同等级深度推理或代码施工的子任务用 `Model: "inherit"`。
 > - **4c / 4a 配额与档位分流**：当主会话运行在 `Gemini 4 Carbon` 时，仅将跨子系统架构重构、深层根因排查、安全审计与形式化/多步验证留在 4c（`High` / `Medium`）；常规单模块施工、高频问答或 Pro 订阅环境优先使用 `Gemini 4 Argon`（`Medium` / `Low`），避免在轻量任务上烧穿 5 小时与周配额。
+> - **对外交付与前端 UI 密度协同**：若使用 `Gemini 4 Carbon` 产出客户文档或前端界面，Word 文档在转出终版 `.docx` 前默认串联 [`humanizer-zh`](../docx-delivery/skills/docx-delivery/SKILL.md)（或交由 `Gemini 4 Argon` 终审润色）；UI 开发严格限制容器嵌套深度（≤3 层）与首屏信息密度（细则见 [`IMPLEMENTATION.md`](../../rules/IMPLEMENTATION.md)）。
 
 ### 2.1 原生 `/swarm`（或 `/teamwork`）并行编排与对抗性验收纪律
 
-当在 Antigravity 中启用 `/swarm`（桌面端斜杠菜单亦显示为 `/teamwork`）驱动多代理并行协作时，除遵守 §3 通信纪律外，必须额外执行以下三条边界控制：
+当在 Antigravity 中启用 `/swarm`（桌面端斜杠菜单亦显示为 `/teamwork`）驱动多代理并行协作时，除遵守 §3 通信纪律外，必须额外执行以下四条边界控制：
 
 1. **角色分层（架构/审计与施工解耦）**：
    - 优先由 `Gemini 4 Carbon` 承担顶层架构拆解、跨代理任务协调与终态对抗性验收（Adversarial Verifier，核查边界条件、回归风险与安全漏洞）；
    - 具体子模块的并发编码、单测补全与只读扫描下放给并行子代理（`Gemini 4 Argon` 或 `Gemini 3.8 Flash`）。
-2. **互斥写入作用域（Disjoint Write Scopes）**：
-   - 并行启动多个带写权限的施工代理时，派单提示词中**必须显式声明各自允许修改的目录或文件白名单**，严禁两个并行代理同时修改同一文件或共享全局配置；优先配合 `Workspace: "share"` 或 `"branch"` 隔离工作树，待验收通过后再统一合入。
-3. **诚实阻塞透传**：
+2. **互斥写入作用域与隔离工作树批量豁免（Disjoint Write Scopes）**：
+   - 并行启动多个带写权限的施工代理时，派单提示词中**必须显式声明各自允许修改的目录或文件白名单**，严禁两个并行代理同时修改同一文件或共享全局配置；
+   - 优先配合 `Workspace: "share"` 或 `"branch"` 隔离 Git worktree：根据全局规则 §1 豁免条款，运行在 `branch` / `share` 隔离工作树内且尚未合入主分支的 Worker，允许在授权白名单内直接执行多文件批量修改（≥5 个文件），无需逐次停下等待用户确认，统一留在 Verifier 终审与合入主分支前由用户一次性拍板。
+3. **并发度与本机资源硬上限（防 CPU/内存打满）**：
+   - **活跃 Worker 并发上限**：单次 `/swarm` 或并行 `invoke_subagent` 同时处于活跃执行态（`working`）的子代理不超过 **3–4 个**（其中带写权限或构建任务的 `share`/`branch` 施工 Worker 同刻不超过 **2–3 个**）。
+   - **重型编译/渲染子进程硬上限（全局 ≤2，同目录/独占锁 = 1）**：严禁多个并行 Worker 各自同时拉起全量编译、打包、渲染或大并发测试子进程（如 `tsc`、`vite build`、`webpack`、`cargo`、`gradle`、全量 `pytest`/`vitest`、Electron / Headless 浏览器实例、asar 打包）。Worker 阶段仅限单文件语法/局部单测自检，全量构建与端到端测试统一收归 Coordinator 或单一 Verifier 在合入阶段串行执行（见 [`BACKGROUND-RESOURCES.md`](../../rules/BACKGROUND-RESOURCES.md)）。
+   - **思考可见性静默豁免**：并行 Worker 与 `flash-verifier` 适用 [`THINKING-VISIBILITY.md`](../../global/THINKING-VISIBILITY.md) 豁免，免除逐次工具调用前的前置播报以降低高单价输出开销与看板噪音。
+4. **诚实阻塞透传**：
    - 若并行子代理遇到证据缺失或前置依赖冲突，必须原样回传 `BLOCKED` 与具体缺失项清单，禁止子代理自行猜测补齐接口契约。
 
 ---

@@ -29,15 +29,16 @@ function inspectCall(call) {
   const tool = typeof call?.name === 'string' ? call.name : 'unknown';
   const args = call?.args && typeof call.args === 'object' ? call.args : {};
   const result = { tool, argNames: Object.keys(args).sort(), kind: 'unparsed' };
-  if (tool === 'view_file') {
-    const file = normalized(args.AbsolutePath);
+  if (tool === 'view_file' || tool === 'read_file') {
+    const file = normalized(args.AbsolutePath ?? args.Path);
     const version = file && versionOf(file);
     const start = args.StartLine ?? 1;
-    const end = args.EndLine;
+    const end = args.EndLine ?? (Number.isSafeInteger(start) && start >= 1 ? start + 799 : undefined);
+    const offset = args.ByteOffset ?? args.ContentOffset ?? 0;
     Object.assign(result, { kind: 'view', file, version });
     if (Number.isSafeInteger(start) && start >= 1 && Number.isSafeInteger(end) && end >= start) {
       result.range = [start, end];
-      result.key = hash(JSON.stringify([file, version, start, end]));
+      result.key = hash(JSON.stringify([file, version, start, end, offset]));
     }
   } else if (tool === 'grep_search') {
     const file = normalized(args.SearchPath);
@@ -51,16 +52,18 @@ function inspectCall(call) {
     result.commandHash = hash(String(args.CommandLine ?? ''));
     result.cwd = normalized(args.Cwd);
     // Arbitrary shell commands cannot be safely converted into file reads.
-  } else if (['write_to_file', 'replace_file_content', 'multi_replace_file_content'].includes(tool)) {
+  } else if (['write_to_file', 'replace_file_content', 'multi_replace_file_content', 'write_file', 'edit_file'].includes(tool)) {
     result.kind = 'write';
-    result.file = normalized(args.TargetFile);
+    result.file = normalized(args.TargetFile ?? args.Path);
   }
   return result;
 }
 function appendLog(root, record) {
   try {
     const file = path.join(root, 'read_loop_log.jsonl');
-    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) return;
+    if (fs.existsSync(file) && fs.statSync(file).size > 5 * 1024 * 1024) {
+      try { fs.renameSync(file, file + '.1'); } catch { return; }
+    }
     fs.appendFileSync(file, JSON.stringify({ ts: new Date().toISOString(), ...record }) + '\n', 'utf8');
   } catch { /* Diagnostics must never block a tool. */ }
 }

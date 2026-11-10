@@ -17,7 +17,7 @@
     "enabled": true,
     "PostToolUse": [
       {
-        "matcher": "run_command|view_file|view_code_item|grep_search|write_to_file|replace_file_content|multi_replace_file_content",
+        "matcher": "run_command|read_file|edit_file|write_file|view_file|view_code_item|grep_search|write_to_file|replace_file_content|multi_replace_file_content",
         "hooks": [
           {
             "type": "command",
@@ -32,7 +32,7 @@
     "enabled": false,
     "PreToolUse": [
       {
-        "matcher": "view_file|view_code_item|grep_search",
+        "matcher": "read_file|view_file|view_code_item|grep_search",
         "hooks": [
           {
             "type": "command",

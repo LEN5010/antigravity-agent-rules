@@ -12,7 +12,7 @@
 > 使用前请注意以下四点边界：
 > 1. **支持 Windows、macOS 与 Linux 全平台一键部署**：Windows 使用 [`install.ps1`](./install.ps1)（兼容 PowerShell 5.1 / `pwsh` 7，挂载 `pretool_guard.ps1`），macOS / Linux 使用 [`./install.sh`](./install.sh)（基于 Node.js >= 18，挂载跨平台 `pretool_guard.cjs`）。两端均默认执行 **5 层全量安装**，也都支持 `-HookOnly` / `--hook-only` 仅装 Hook 层。
 > 2. **正则黑名单是安全网，不是沙箱，可以被绕过**。它用来拦住 Agent 常见的危险误操作，防不住换写法绕过或刻意构造的命令。
-> 3. **用 Ask-First 审批模式的人注意，默认 allow 分支会自动放行非黑名单命令**。`pretool_guard.ps1` / `pretool_guard.cjs` 对没命中黑名单的命令默认返回 `{"decision":"allow"}`，这是配合 Antigravity 的 `autoExecutionPolicy = EAGER (Turbo)` 设计的；如果你开的是每次手动审批（Ask-First），不要直接原样启用该分支。
+> 3. **Hook 默认放行边界（Ask-First 模式慎用）**：`pretool_guard.ps1` / `pretool_guard.cjs` 适配 Antigravity 的 `autoExecutionPolicy = EAGER (Turbo)` 模式，**未命中高危黑名单的命令将由 Hook 返回 `{"decision":"allow"}` 放行**，请用户根据自身安全需求开启；如果你开的是每次手动审批（Ask-First），请勿直接原样启用该默认 `allow` 分支。
 > 4. 不要把本仓库所有 `.md` 文件拼接塞进同一个系统提示词（System Prompt / `GEMINI.md`）全量常驻。大模型有效注意力有限，全设为 `always_on` 不但白占数万 Token 推理空间，日常聊句简单问答也会触发繁琐的工程仪式并冲淡安全红线。正确用法是只让 `global/` 下约 90 行核心规则常驻，高危命令交给 `hooks/` 在进程级拦截（0 Token 开销），其余 `rules/`、`tone/` 和 `skills/` 由模型按场景触发读取。
 
 ---
@@ -69,7 +69,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\uninstall.ps1
 
 ### macOS / Linux 跨平台安装与守卫细节
 
-macOS / Linux 版 Antigravity 使用同一套 `~/.gemini` 目录结构与 hooks 协议（payload 和 `{"decision": ...}` 返回格式一致，区别仅在于 hook 命令在 Unix 上经 `sh -c` 执行，Windows 上经 `cmd /c` 执行）：
+依据 Antigravity Hooks 协议规范，macOS / Linux 版与 Windows 版使用同一套 `~/.gemini` 目录结构与生命周期钩子协议（payload 和 `{"decision": ...}` 返回格式一致，区别仅在于 hook 命令在 Unix 上经 `sh -c` 执行，Windows 上经 `cmd /c` 执行）：
 
 - 拦截脚本使用 [`hooks/scripts/pretool_guard.cjs`](./hooks/scripts/pretool_guard.cjs)。前 29 条规则与 `pretool_guard.ps1` 逐条一致，另外补齐了 17 条 macOS / Linux 专属规则：磁盘与系统完整性保护（`diskutil erase*`、`dd of=/dev/`、`mkfs` / `newfs_*`、`tmutil delete`、`csrutil disable`）；结束代理客户端（`kill` / `pkill` / `killall`、`launchctl bootout/unload`、`systemctl stop`、`osascript ... quit`，覆盖 ClashX、Clash Verge、mihomo、sing-box、Surge、Stash 等）；修改网络与系统代理（`networksetup -set*`、`ifconfig ... down`、`ipconfig set`、`route delete/flush/change`、`pfctl -d/-F`、`nmcli ... off/down`）。只读诊断命令（`networksetup -get*`、`scutil --proxy`、`pgrep`、`launchctl list`、`diskutil list`）照常放行。
 - 安装器会把 `hooks.json` 里的命令改写成 `"/opt/homebrew/bin/node" ./scripts/pretool_guard.cjs` 这种绝对路径形式。原因是从 Dock 或桌面启动器拉起的 Antigravity 不一定继承终端里的 PATH，直接写 `node` 可能找不到。
@@ -82,10 +82,10 @@ macOS / Linux 版 Antigravity 使用同一套 `~/.gemini` 目录结构与 hooks 
 
 ### 1. 拦什么
 
-[`hooks/scripts/pretool_guard.ps1`](./hooks/scripts/pretool_guard.ps1) 挂载在 `PreToolUse` 上，每次 `run_command` 执行前同步触发，用正则黑名单硬拦两类命令：
+[`hooks/scripts/pretool_guard.ps1`](./hooks/scripts/pretool_guard.ps1)（Windows）与 [`hooks/scripts/pretool_guard.cjs`](./hooks/scripts/pretool_guard.cjs)（macOS / Linux）挂载在 `PreToolUse` 上，每次 `run_command` 执行前同步触发，用正则黑名单硬拦两类命令：
 
 - 高危删改与历史破坏：拦截递归强删文件目录、Git 强制回滚或强推、磁盘格式化与删注册表命令。
-- 防止 Agent 诊断网络时误杀本地代理软件、TUN 虚拟网卡服务或篡改系统代理注册表：拦截结束本地代理进程、停止虚拟网卡服务、断网删路由及修改系统代理设置的命令（规则见 `pretool_guard.ps1` 第 105–114 行）。
+- 防止 Agent 诊断网络时误杀本地代理软件、TUN 虚拟网卡服务或篡改系统代理注册表：拦截结束本地代理进程、停止虚拟网卡服务、断网删路由及修改系统代理设置的命令（规则见 `pretool_guard.ps1` 第 105–114 行与 `pretool_guard.cjs` 对应规则表）。
 
 <details>
 <summary>点击展开：具体拦截命令清单</summary>
@@ -95,7 +95,7 @@ macOS / Linux 版 Antigravity 使用同一套 `~/.gemini` 目录结构与 hooks 
 
 </details>
 
-命中黑名单时直接返回 `{"decision":"deny","reason":"HARD GATE: blocked - ..."}`，并写入 `hook_log.jsonl` 审计日志（超过 512 KB 自动轮转为 `.1`）。另外还有 [`hooks/scripts/read_loop_guard.cjs`](./hooks/scripts/read_loop_guard.cjs)（配合 [`read_loop_settings.json`](./hooks/scripts/read_loop_settings.json)），用来监测同一会话对未变更文件相同行号区间的重复读取（`repeatLimit: 3`），当前默认只跑在 `PostToolUse` 的 `observe` 模式，`enforce` 阻断模式尚未验证，标 `NOT_PROVEN`。
+命中黑名单时直接返回 `{"decision":"deny","reason":"HARD GATE: blocked - ..."}`，并写入 `hook_log.jsonl` 审计日志（超过 512 KB 自动轮转为 `.1`）；**未命中高危黑名单的命令将由 Hook 返回 `{"decision":"allow"}` 放行**（适配 Turbo / Eager 自动执行模式，请用户根据自身安全需求开启）。另外还有 [`hooks/scripts/read_loop_guard.cjs`](./hooks/scripts/read_loop_guard.cjs)（配合 [`read_loop_settings.json`](./hooks/scripts/read_loop_settings.json)），用来监测同一会话对未变更文件相同行号区间的重复读取（`repeatLimit: 3`），当前默认只跑在 `PostToolUse` 的 `observe` 模式，`enforce` 阻断模式尚未验证，标 `NOT_PROVEN`。
 
 ### 2. PS5.1 GBK 吞反斜杠导致静默放行的 Bug 与修复
 
@@ -281,8 +281,8 @@ flowchart TD
 
 1. 宿主操作系统与平台差异：
    - Windows、macOS、Linux 三端均支持全量 5 层部署与卸载（Windows 使用 `install.ps1` + `pretool_guard.ps1`，macOS / Linux 使用 `./install.sh` + `pretool_guard.cjs`）。`rules/WINDOWS-RELEASE.md` 属于按需触发（`trigger: model_decision`）的 Windows 交付物专项规则，在 macOS / Linux 常规开发中不会加载。
-2. Turbo 自动执行策略下的 Hook 行为说明：
-   - `pretool_guard.ps1` 与 `pretool_guard.cjs` 对未命中黑名单的命令默认返回 `{"decision":"allow"}`，这与 Antigravity 开启 `autoExecutionPolicy = EAGER (Turbo)` 的行为一致。如果你在客户端使用的是“每次执行命令前手动审批（Ask-First）”策略，请勿直接原样启用该 Hook 的默认 `allow` 分支，否则它会替你自动放行非黑名单命令。
+2. Turbo 自动执行策略下的 Hook 默认放行边界：
+   - 未命中高危黑名单的命令将由 `pretool_guard.ps1` / `pretool_guard.cjs` 返回 `{"decision":"allow"}` 放行（适配 `autoExecutionPolicy = EAGER` / Turbo 模式），请用户根据自身安全需求开启。如果你在客户端使用的是“每次执行命令前手动审批（Ask-First）”策略，请勿直接原样启用该 Hook 的默认 `allow` 分支，否则它会替你自动放行非黑名单命令。
 3. `read_loop_guard.cjs` 的 `enforce` 拦截模式尚未验证（`NOT_PROVEN`）：
    - `read_loop_guard.cjs` 当前默认配置为 `"mode": "observe"`（仅在 `PostToolUse` 记录重复读取诊断，不阻断工具调用）；`read_loop_settings.json` 中的 `nativeCoverageVerified`、`rangeOutputVerified`、`permissionPolicyVerified` 三个 Verified 标志均为 `false`，且 `hooks.json` 中 `read-loop-enforcement` 默认为 `"enabled": false`。
 4. 软规则不能替代硬权限：
@@ -292,7 +292,7 @@ flowchart TD
 
 ---
 
-## 开源协议与致谢
+## 开源协议、致谢与声明
 
 - 本仓库原创规则、脚本与架构文档采用 [MIT License](./LICENSE) 开源（Copyright (c) 2026 安钰）。
 - `tone/` 与 `skills/chinese-novelist/` 下引用的第三方开源 Skill 均遵循各自收录版本的 MIT License，详见对应子目录下的 `LICENSE` 与 `UPSTREAM.md`：
@@ -300,3 +300,5 @@ flowchart TD
   - [`humanizer-zh`](https://github.com/op7418/Humanizer-zh) / [`blader/humanizer`](https://github.com/blader/humanizer) — 分别保留上游 `LICENSE` 原文（`Copyright (c) 2026 歸藏`，MIT）与 `LICENSE.blader` 原文（`Copyright (c) 2025 Siqi Chen`，MIT）。
   - [`chinese-novelist-skill`](https://github.com/PenglongHuang/chinese-novelist-skill) — 对照上游 `master` 分支保留 `LICENSE` 原文（`Copyright (c) 2026 PenglongHuang`，MIT）。
 - 社区致谢：本项目认可并致谢 [LINUX DO 社区](https://linux.do/)（[https://linux.do](https://linux.do)），感谢社区佬友在 AI Agent 工程实践与工具链上的交流分享。
+
+> **声明**：本项目为独立的非官方社区开源配置与安全规则集，与 Google LLC 无任何隶属、授权或背书关系。文中提及的 Google、Antigravity、Gemini 等名称仅用于说明兼容环境，相关商标归各自所有者所有。

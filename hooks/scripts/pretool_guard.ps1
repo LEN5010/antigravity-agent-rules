@@ -6,26 +6,43 @@
 #            {"toolCall":{"name":"run_command","args":{"CommandLine":"npm test"}},
 #             "conversationId":"...", "stepIdx":19}
 #   stdout : exactly ONE JSON object, nothing else.
-#            {"decision":"ask"}               (default for non-flagged commands)
-#            {"decision":"allow"}             (opt-in via AGY_HOOK_DEFAULT_DECISION=allow)
-#            {"decision":"deny","reason":"..."}
+#            {"decision":"ask"}                  non-flagged command (defaultDecision)
+#            {"decision":"deny","reason":"..."}  flagged command
+#            {"decision":"force_ask","reason":"..."}  confirm-tier command, only
+#                                                when confirmDecision is set to it
 #
 # DESIGN NOTES
 #   1. ASCII-ONLY SOURCE. Never add non-ASCII characters to this file.
 #      Reason: Windows PowerShell 5.1 parses BOM-less scripts as ANSI, and
 #      this path may contain non-ASCII directory names. Keeping the source pure
 #      ASCII removes the whole class of encoding faults.
-#   2. SAFE DEFAULT ("ask"). Non-flagged commands return {"decision":"ask"} by
-#      default so the hook never auto-approves commands behind the user's back
-#      under Ask-First policy. Users who want hook-level auto-approval can set
-#      AGY_HOOK_DEFAULT_DECISION=allow.
-#   3. FAIL-OPEN TO DEFAULT DECISION. Any internal error returns the default
-#      decision ("ask" unless overridden) so a broken guard never wedges the
-#      synchronous agent loop.
-#   4. PRIVACY & SECRET REDACTION IN AUDIT LOG. By default, hook_log.jsonl only
-#      records blocked (DENY-DANGER) and error (ERROR-FAILOPEN) events (set
-#      AGY_HOOK_LOG_ALL=1 to log allowed/asked commands). All logged command
-#      strings are scrubbed for tokens, passwords, and API keys before writing.
+#   2. TWO TIERS OF FLAGGED COMMANDS.
+#      block   - irreversible and outside any workspace (format a disk, delete
+#                C:\ or the home directory). Always "deny". Not configurable.
+#      confirm - destructive but sometimes intended (rm -r build, git reset
+#                --hard, stopping a proxy client). Answered with confirmDecision,
+#                which defaults to "deny" so nothing changes until the user opts in.
+#   3. SETTINGS. Optional pretool_guard_settings.json next to this script:
+#        { "defaultDecision": "ask" | "allow",
+#          "confirmDecision": "deny" | "force_ask" | "ask",
+#          "logAll": false }
+#      Environment variables win over the file: AGY_HOOK_DEFAULT_DECISION,
+#      AGY_HOOK_CONFIRM_DECISION, AGY_HOOK_LOG_ALL. AGY_HOOK_SETTINGS points at
+#      a different settings file. A missing, unreadable or invalid file, and
+#      any unknown value, fall back to the strict defaults ("ask" / "deny").
+#      The file exists because a GUI-launched host does not inherit the
+#      environment of the user's shell.
+#   4. WHAT "ask" AND "allow" MEAN IS DECIDED BY THE HOST, not by this script.
+#      Check the hooks documentation of the installed client version and try
+#      both on a real host before changing defaultDecision.
+#   5. FAIL-OPEN TO DEFAULT DECISION. Any internal error returns defaultDecision
+#      so a broken guard never wedges the synchronous agent loop.
+#   6. PRIVACY & SECRET REDACTION IN AUDIT LOG. By default, hook_log.jsonl only
+#      records flagged (DENY-DANGER, CONFIRM-DANGER) and error (ERROR-FAILOPEN)
+#      events; logAll also records the rest. All logged command strings are
+#      scrubbed for tokens, passwords, and API keys before writing.
+#   7. The rule table mirrors WINDOWS_RULES in pretool_guard.cjs one-to-one.
+#      Keep them in sync; verify-hook.py compares the two tables.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'
@@ -39,13 +56,46 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logFile   = Join-Path $scriptDir 'hook_log.jsonl'
 $stateDir  = Join-Path $scriptDir 'state'
 
-$defaultMode = 'ask'
-if ($env:AGY_HOOK_DEFAULT_DECISION -match '^(allow|ask)$') {
-    $defaultMode = $env:AGY_HOOK_DEFAULT_DECISION.ToLowerInvariant()
+# --- settings: environment variable first, then the settings file, then the
+#     strict default. A missing or invalid file leaves $settings empty. --------
+$settingsPath = $env:AGY_HOOK_SETTINGS
+if ([string]::IsNullOrWhiteSpace($settingsPath)) {
+    $settingsPath = Join-Path $scriptDir 'pretool_guard_settings.json'
 }
+$settings = $null
+try {
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        $settings = [System.IO.File]::ReadAllText($settingsPath, (New-Object System.Text.UTF8Encoding($false))) | ConvertFrom-Json
+    }
+} catch { $settings = $null }
+
+function Pick-Decision($EnvValue, $FileValue, [string]$Pattern, [string]$Fallback) {
+    foreach ($value in @($EnvValue, $FileValue)) {
+        if (($value -is [string]) -and ($value -match $Pattern)) { return $value.ToLowerInvariant() }
+    }
+    return $Fallback
+}
+
+$fileDefault = $null
+$fileConfirm = $null
+$fileLogAll  = $false
+if ($null -ne $settings) {
+    try {
+        $fileDefault = $settings.defaultDecision
+        $fileConfirm = $settings.confirmDecision
+        $fileLogAll  = ($settings.logAll -eq $true)
+    } catch { }
+}
+
+$defaultMode = Pick-Decision $env:AGY_HOOK_DEFAULT_DECISION $fileDefault '^(allow|ask)$' 'ask'
+$confirmMode = Pick-Decision $env:AGY_HOOK_CONFIRM_DECISION $fileConfirm '^(deny|force_ask|ask)$' 'deny'
 $DEFAULT_PASS = '{"decision":"' + $defaultMode + '"}'
 $result       = $DEFAULT_PASS
-$logAll       = ($env:AGY_HOOK_LOG_ALL -match '^(1|true|yes)$')
+if ([string]::IsNullOrEmpty($env:AGY_HOOK_LOG_ALL)) {
+    $logAll = $fileLogAll
+} else {
+    $logAll = ($env:AGY_HOOK_LOG_ALL -match '^(1|true|yes)$')
+}
 
 function Write-Utf8NoBom([string]$Path, [string]$Text, [bool]$Append) {
     $enc = New-Object System.Text.UTF8Encoding($false)
@@ -83,6 +133,10 @@ $boundary = '(^|[\s;&|("''`\\/])'
 # Git prefix allowing global options (-C <dir>, -c <k=v>, --git-dir=..., --work-tree=..., etc.)
 # and a closing quote after a quoted executable path ("C:\Program Files\Git\cmd\git.exe" reset ...).
 $gitPrefix = $boundary + 'git(\.exe)?["'']?\s+(?:-[Cc]\s+\S+\s+|--(?:git-dir|work-tree|namespace|super-prefix|exec-path)(?:=\S+|\s+\S+)\s+|--(?:bare|no-pager|no-replace-objects|literal-pathspecs)\s+)*'
+
+# Delete targets that are never a workspace: filesystem or drive roots, the home
+# directory, another user's home, and top-level system directories.
+$rootish = '(?:/\*?|~[\\/]?\*?|\$HOME[\\/]?\*?|\$\{HOME\}[\\/]?\*?|%(?:USERPROFILE|SystemDrive|SystemRoot)%[\\/]?\*?|\$env:(?:USERPROFILE|SystemDrive|SystemRoot|HOME)[\\/]?\*?|[a-zA-Z]:[\\/]?\*?|/(?:etc|usr|var|bin|sbin|lib|boot|opt|home|root|Users|System|Library|Applications)[\\/]?\*?|/(?:home|Users)/[^\s\\/"'']+/?\*?|[a-zA-Z]:[\\/](?:Windows|Users|Program Files(?: \(x86\))?|ProgramData)[\\/]?\*?|[a-zA-Z]:[\\/]Users[\\/][^\s\\/"'']+[\\/]?\*?)'
 
 # A masked segment must end the command, end at ; & || or a newline, or be piped
 # into something that is not a shell or interpreter. echo 'rm -rf src' | sh
@@ -155,12 +209,16 @@ try {
     $maskedCmd = Mask-DataQuotes $cmd
 
     # ------------------------------------------------------------------
-    # 1) Dangerous-command hard block
+    # 1) Flagged commands. A rule with tier = 'block' always answers "deny".
+    #    Every other rule is the confirm tier and answers $confirmMode.
     # ------------------------------------------------------------------
     $danger = $false
     $why    = ''
+    $tier   = ''
 
     $rules = @(
+        @{ rx = $boundary + '(?:rm|rmdir|rd|del|erase|ri|Remove-Item)(?:\.exe)?\b[^;&|\r\n]*[\s"''=]' + $rootish + '(?=["'']?(?:\s|$|[;&|)]))'; why = 'delete of a filesystem root, home or system directory'; tier = 'block' },
+        @{ rx = $boundary + 'find\s+["'']?(?:/|~|\$HOME|\$\{HOME\})["'']?\s[^;&|\r\n]*\s(?:-delete\b|-exec(?:dir)?\s+(?:\S*[\\/])?(?:rm|rmdir)\b)'; why = 'find -delete from / or the home directory'; tier = 'block' },
         @{ rx = 'Remove-Item\b[^;&|\r\n]*\s-(r|recurse)\b';          why = 'recursive delete (Remove-Item -Recurse)' },
         @{ rx = '(^|[^a-zA-Z0-9_-])(Remove-Item|ri|rm|del|erase|rd|rmdir)\b[^;&|\r\n]*(\s-(r|recurse)\b)'; why = 'recursive delete (PS alias/short-param)' },
         @{ rx = $boundary + 'rm(\.exe)?\s+(-[a-zA-Z]*[rR]|--recursive\b|[^;&|\r\n]*\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b)'; why = 'rm -r / --recursive' },
@@ -183,11 +241,11 @@ try {
         @{ rx = $gitPrefix + 'switch\b[^;&|\r\n]*\s(--discard-changes|-f|--force)\b'; why = 'git switch --discard-changes' },
         # SUBCMD_RM is what Mask-DataQuotes leaves in place of git rm. Forced removal outside --cached drops uncommitted edits.
         @{ rx = $gitPrefix + 'SUBCMD_RM\b(?![^;&|\r\n]*\s--cached\b)[^;&|\r\n]*\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\b'; why = 'git rm --force' },
-        @{ rx = 'Format-Volume';                                     why = 'Format-Volume' },
-        @{ rx = '(^|\s)format\s+[a-zA-Z]:';                          why = 'format drive' },
+        @{ rx = 'Format-Volume';                                     why = 'Format-Volume'; tier = 'block' },
+        @{ rx = '(^|\s)format\s+[a-zA-Z]:';                          why = 'format drive'; tier = 'block' },
         @{ rx = 'Remove-Item.*HKLM:';                                why = 'registry delete (HKLM)' },
         @{ rx = '(^|\s)reg\s+delete';                                why = 'reg delete' },
-        @{ rx = 'Clear-Disk|Initialize-Disk';                        why = 'disk re-init' },
+        @{ rx = 'Clear-Disk|Initialize-Disk';                        why = 'disk re-init'; tier = 'block' },
         # --- Proxy / network protection (user rule: proxy/network is OFF-LIMITS
         #     without explicit per-task user approval) --------------------------
         @{ rx = '(taskkill|tskill|pkill|killall|Stop-Process|wmic\s+process).{0,120}(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|netch|sstap|shadowsocks|trojan(-go)?|hysteria|naiveproxy|cfw|sysproxy|privoxy)'; why = 'kill proxy client (user rule: proxy/network off-limits without explicit user approval)' },
@@ -202,8 +260,14 @@ try {
         @{ rx = 'netsh\s+winhttp\s+set\s+proxy';                         why = 'set WinHTTP proxy (user rule: proxy/network off-limits without explicit user approval)' }
     )
 
+    # A block rule wins over a confirm rule wherever the two sit in the table.
     foreach ($r in $rules) {
-        if ($maskedCmd -match $r.rx) { $danger = $true; $why = $r.why; break }
+        if (($r.tier -eq 'block') -and ($maskedCmd -match $r.rx)) { $danger = $true; $why = $r.why; $tier = 'block'; break }
+    }
+    if (-not $danger) {
+        foreach ($r in $rules) {
+            if (($r.tier -ne 'block') -and ($maskedCmd -match $r.rx)) { $danger = $true; $why = $r.why; $tier = 'confirm'; break }
+        }
     }
 
     $count = 0
@@ -211,8 +275,13 @@ try {
     # ------------------------------------------------------------------
     # 3) Verdict
     # ------------------------------------------------------------------
-    if ($danger) {
+    $verdict = $defaultMode.ToUpperInvariant()
+    if ($danger -and (($tier -eq 'block') -or ($confirmMode -eq 'deny'))) {
+        $verdict = 'DENY-DANGER'
         $result = '{"decision":"deny","reason":"HARD GATE: blocked - ' + $why + ' (global rule 1/9). Report to the user instead of retrying a variant."}'
+    } elseif ($danger) {
+        $verdict = 'CONFIRM-DANGER'
+        $result = '{"decision":"' + $confirmMode + '","reason":"CONFIRM: ' + $why + ' (global rule 1/9). Runs only if the user approves this exact command."}'
     }
 
     # ------------------------------------------------------------------
@@ -227,9 +296,6 @@ try {
                     Move-Item $logFile $rotFile -Force
                 }
             }
-            $verdict = $defaultMode.ToUpperInvariant()
-            if ($danger) { $verdict = 'DENY-DANGER' }
-
             $rec = [ordered]@{
                 ts      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
                 verdict = $verdict

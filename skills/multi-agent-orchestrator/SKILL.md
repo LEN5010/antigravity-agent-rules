@@ -1,6 +1,6 @@
 ---
 name: multi-agent-orchestrator
-description: 当任务涉及多子代理（Subagents）分工、默认派 3.8f（model: flash）子代理干脏活/只读验证、大型代码库跨模块检索、需要保持主对话上下文干净、需要利用独立工作区（branch/share）做无污染实验、或需要通过 MCP 遥控外部客户端 Agent（<YOUR_HEADLESS_MCP> / <YOUR_GUI_MCP>）时使用。指导何时及如何委派 flash-verifier、research、<YOUR_DOMAIN_VERIFIER>、自建 subagent 以及外部 MCP。
+description: 当任务涉及多子代理（Subagents）分工、/swarm（或 /teamwork）多代理并行协作、默认派 3.8f（model: flash）子代理干脏活/只读验证、大型代码库跨模块检索、需要保持主对话上下文干净、需要利用独立工作区（branch/share）做无污染实验、或需要通过 MCP 遥控外部客户端 Agent（<YOUR_HEADLESS_MCP> / <YOUR_GUI_MCP>）时使用。指导何时及如何委派 flash-verifier、research、<YOUR_DOMAIN_VERIFIER>、自建 subagent 以及外部 MCP。
 ---
 
 # 多 Agent 委派与跨端协同规范（multi-agent-orchestrator）
@@ -30,7 +30,21 @@ description: 当任务涉及多子代理（Subagents）分工、默认派 3.8f�
 | **自定义只读专员** (`define_subagent`) | `flash` / `flash_lite` | `inherit` | 需要反复执行的专项检查（如批量格式合规检查、分片对账）。定义时设 `EnableWriteTools: false`。 |
 | **`self`（并行施工/实验）** | `inherit` | `share` 或 `branch` | 独立子模块开发或隔离验证。`share` 共享底层仓库（类 git worktree），避免全量复制开销且互不干扰。 |
 
-> **纪律**：日常高频扫描、只读验证和检索脏活优先走 `flash`（3.8f）子代理（如 `flash-verifier`）；需要主模型同等级深度推理或代码施工的子任务用 `Model: "inherit"`。
+> **纪律**：
+> - 日常高频扫描、只读验证和检索脏活优先走 `flash`（3.8f）子代理（如 `flash-verifier`）；需要主模型同等级深度推理或代码施工的子任务用 `Model: "inherit"`。
+> - **4c / 4a 配额与档位分流**：当主会话运行在 `Gemini 4 Carbon` 时，仅将跨子系统架构重构、深层根因排查、安全审计与形式化/多步验证留在 4c（`High` / `Medium`）；常规单模块施工、高频问答或 Pro 订阅环境优先使用 `Gemini 4 Argon`（`Medium` / `Low`），避免在轻量任务上烧穿 5 小时与周配额。
+
+### 2.1 原生 `/swarm`（或 `/teamwork`）并行编排与对抗性验收纪律
+
+当在 Antigravity 中启用 `/swarm`（桌面端斜杠菜单亦显示为 `/teamwork`）驱动多代理并行协作时，除遵守 §3 通信纪律外，必须额外执行以下三条边界控制：
+
+1. **角色分层（架构/审计与施工解耦）**：
+   - 优先由 `Gemini 4 Carbon` 承担顶层架构拆解、跨代理任务协调与终态对抗性验收（Adversarial Verifier，核查边界条件、回归风险与安全漏洞）；
+   - 具体子模块的并发编码、单测补全与只读扫描下放给并行子代理（`Gemini 4 Argon` 或 `Gemini 3.8 Flash`）。
+2. **互斥写入作用域（Disjoint Write Scopes）**：
+   - 并行启动多个带写权限的施工代理时，派单提示词中**必须显式声明各自允许修改的目录或文件白名单**，严禁两个并行代理同时修改同一文件或共享全局配置；优先配合 `Workspace: "share"` 或 `"branch"` 隔离工作树，待验收通过后再统一合入。
+3. **诚实阻塞透传**：
+   - 若并行子代理遇到证据缺失或前置依赖冲突，必须原样回传 `BLOCKED` 与具体缺失项清单，禁止子代理自行猜测补齐接口契约。
 
 ---
 

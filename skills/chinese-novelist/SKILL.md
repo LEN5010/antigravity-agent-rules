@@ -22,7 +22,8 @@ metadata:
 - 第三、四阶段不向用户提问，但按全局 §4A 汇报进度：每完成一批章节（默认 5 章）报一句进度，汇报不暂停写作。
 - 重写已完成章节属于覆盖已有成果。第二阶段确认时一并取得授权；重写前把原稿存到 `chapters/_prev/`。
 - 去 AI 味：每章写完后按 lieflat-less-ai-tone 的规则自检，文学体裁豁免照常适用。不对全书做二次改写。
-- **防断流分块落盘（Antigravity `BidiGenerateContent` 整包缓冲规避）**：Antigravity 客户端的 `BidiGenerateContent` 流在服务端生成 `write_file` 工具 JSON 参数时采用整包缓冲（参数全部生成完毕前流处于 0 字节静默），单次写入超过 ~2,500 字极易因后台缓冲超过 90~120 秒而触发流静默中断（`The stream was interrupted` / `stream idle timeout`）。撰写每章正文（3,000–5,000+ 字）时，**严禁单次 `write_file` 一次性写入整章**；必须按场景分 **2–3 段** 落盘（首段用 `write_file` 创建章节文件，后续段落用 `write_file` + `Append: true` 依次追加，**每次调用的 `Content` 严格控制在 1,500–2,000 字以内**）。
+- **模型阶段分工建议（4c / 4a 协同）**：阶段 1–2（立项问答、`01-大纲.md` 结构推演）与阶段 4（全书连续性、时间线与伏笔回收核查）可使用 `Gemini 4 Carbon` 强化逻辑严密性；阶段 3（逐章正文写作）优先切换至文笔更自然松弛、首字延迟更低的 `Gemini 4 Argon`（建议 `Low` 或 `Medium` 思考档位）。若使用 Carbon 执笔正文，须配合具体对白/叙事节奏正反例软化其默认偏冷静的文档语感。
+- **防断流分块落盘（Antigravity `BidiGenerateContent` 整包缓冲规避）**：Antigravity 客户端的 `BidiGenerateContent` 流在服务端生成 `write_file` 工具 JSON 参数时采用整包缓冲（参数全部生成完毕前流处于 0 字节静默），单次写入超过 ~2,500 字极易因后台缓冲超过 90~120 秒而触发流静默中断（`The stream was interrupted` / `stream idle timeout`）。撰写每章正文（3,000–5,000+ 字）时，**严禁单次 `write_file` 一次性写入整章**；必须按场景分 **2–4 段** 落盘（首段用 `write_file` 创建章节文件，后续段落用 `write_file` + `Append: true` 依次追加；**Argon 下每次调用的 `Content` 严格控制在 1,500–2,000 字以内，若当前会话为思考耗时更长的 `Gemini 4 Carbon`，须下调思考档位至 `Low` / `Medium` 并将单次 `Content` 进一步收紧至 1,000–1,500 字以内**）。
 
 ## 流程
 
@@ -49,7 +50,7 @@ metadata:
 ### 3 写作
 
 - 模式：默认 `serial`，主 Agent 逐章写。`parallel` 只在运行环境能派生写作子代理时可选。
-- 每章流程：读本章大纲、`03-连续性记录.md` 和上一章结尾约 500 字 → **按场景分 2–3 段调用 `write_file`（首段新建、后续 `Append: true`，单次 ≤ 2,000 字）完成本章写作** → 字数检查 → 去 AI 味自检 → 更新 `02-写作计划.json` 中的章节状态 → 在 `03-连续性记录.md` 追加本章摘要（≤150 字）、新埋的伏笔、已回收的伏笔和人物状态变化。
+- 每章流程：读本章大纲、`03-连续性记录.md` 和上一章结尾约 500 字 → **按场景分 2–4 段调用 `write_file`（首段新建、后续 `Append: true`；Argon 单次 ≤ 2,000 字，Carbon 单次 ≤ 1,500 字）完成本章写作** → 字数检查 → 去 AI 味自检 → 更新 `02-写作计划.json` 中的章节状态 → 在 `03-连续性记录.md` 追加本章摘要（≤150 字）、新埋的伏笔、已回收的伏笔和人物状态变化。
 
 → [phase3-writing.md](references/flows/phase3-writing.md)
 

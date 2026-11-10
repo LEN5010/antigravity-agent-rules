@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2] - 2026-11-11
+
+- **针对 Gemini 4 Carbon（4c）与 `/swarm` 并行编排的增量适配（`global/` 常驻层零改动）**：
+  - 更新 `skills/multi-agent-orchestrator/SKILL.md`：补充 `Gemini 4 Carbon` / `Gemini 4 Argon` 配额与思考档位分流纪律；新增 §2.1 原生 `/swarm`（桌面端斜杠菜单亦作 `/teamwork`）并行编排与对抗性验收纪律，明确角色分层（Carbon 统筹架构与终态审计、Argon/Flash 并发施工与扫描）、互斥写入作用域（`Disjoint Write Scopes`，显式白名单 + `share`/`branch` 隔离工作树）及诚实阻塞透传要求。
+  - 更新 `skills/chinese-novelist/SKILL.md`：补充 4c / 4a 分阶段模型协同建议（大纲推演与全书连续性核查可用 Carbon，逐章正文优先 Argon）；针对 Carbon 较长的内部推理耗时，将 `BidiGenerateContent` 分块 `write_file` 在 Carbon 下的单次字数上限收紧至 `1,000–1,500` 字（分 2–4 段落盘，下调至 `Low` / `Medium` 档位），并同步校准阶段 3 写作流程说明。
+  - 更新 `README.md`：在适配模型版本矩阵（`VERIFIED`）中新增 `Gemini 4 Carbon` 说明，并同步更新文件总表中 `multi-agent-orchestrator` 的触发与职责摘要。
+
 ## [1.2.1] - 2026-11-10
 
 - **新增工具调用前思考可见性常驻规则（`global/THINKING-VISIBILITY.md`）**：

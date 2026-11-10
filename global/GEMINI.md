@@ -9,7 +9,7 @@
 ## 身份、隐私与路径脱敏（防开盒铁律）
 
 - **防开盒铁律（Strict Anti-Doxxing）**：严禁在任何生成内容、文档元数据（EPUB/PDF/DOCX 等的 Author/Creator 字段）、封面页或代码注释中提取、推断或使用用户的真实姓名、姓名拼音、OS 用户名（`$USER` / `%USERNAME%` / `C:\Users\...`）、设备主机名或 Git 配置（`user.name` / `user.email`）。
-- **默认署名（Default Pen Name）**：所有文学创作、电子书、脚本、文档及公开交付物，默认统一使用固定笔名 **「安钰」**（不便署名的场景可留空或用「佚名」）。若正式或法律文件确需使用真实姓名，必须先明确询问并获用户批准。
+- **默认署名（Default Pen Name）**：所有文学创作、电子书、脚本、文档及公开交付物，默认不自动填入系统用户名或 Git 账号名（未指定时留空、使用「佚名」或按用户在项目配置中指定的固定笔名署名）。若正式或法律文件确需使用真实姓名，必须先明确询问并获用户批准。
 - **路径脱敏（Path Sanitization）**：严禁在生成的文件、代码、配置、导出日志或验证报告中硬编码或暴露含系统用户名的本机绝对路径；代码与脚本一律使用相对路径或环境变量/API（如 `os.homedir()`、`process.env.LOCALAPPDATA`、`$HOME`、`%USERPROFILE%`），报告与文本展示统一用相对路径或 `~` 脱敏（仅限当前聊天内供 IDE 点击跳转的 `file://` 链接与工具调用参数按系统要求使用实际路径，绝不写入交付物）。
 
 ## 用户代理与网络配置：未经许可一律只读
@@ -23,12 +23,12 @@
 
 - **Windows**：优先使用 Git Bash（bash 语法）执行终端命令，显式调用 `bash -lc "..."`（位于 `C:\Program Files\Git\bin\bash.exe`）。不要默认写 PowerShell/pwsh 语法，除非该操作只能由 PowerShell 完成或用户点名要求；必须用 PowerShell 时，一律用 pwsh 7（`pwsh`），不用 `powershell`（5.1），不要主动另起 cmd。
 - **macOS / Linux**：直接使用系统原生 `zsh` 或 `bash`（如 `bash -lc "..."` / `zsh -lc "..."`）。
-- **例外**：验证目标脚本（BAT/CMD/PowerShell/sh）时允许调用其实际解释器完成实跑；脱钩启动桌面 GUI 客户端或独立常驻程序时允许按平台使用 `Start-Process` / `cmd /c start "" <exe>`（Windows）或 `open -a` / `nohup ... >/dev/null 2>&1 &`（macOS / Linux，见 [BACKGROUND-RESOURCES.md](<file:///<YOUR_PATH>/.gemini/config/plugins/anyi-global-rules/rules/BACKGROUND-RESOURCES.md>)）。
+- **例外**：验证目标脚本（BAT/CMD/PowerShell/sh）时允许调用其实际解释器完成实跑；脱钩启动桌面 GUI 客户端或独立常驻程序时允许按平台使用 `Start-Process` / `cmd /c start "" <exe>`（Windows）或 `open -a` / `nohup ... >/dev/null 2>&1 &`（macOS / Linux，见 [BACKGROUND-RESOURCES.md](./config/plugins/anyi-global-rules/rules/BACKGROUND-RESOURCES.md)）。
 
 ## 多代理委派（Subagent 派工）
 
-- 任务涉及子代理分工、只读验证/日志筛查/哈希对账、跨模块检索、隔离实验，或需跨端遥控（`<YOUR_MCP_SERVER>` 驱动外部 Agent）时，先读 [multi-agent-orchestrator Skill](<file:///<YOUR_PATH>/.gemini/config/plugins/anyi-global-rules/skills/multi-agent-orchestrator/SKILL.md>) 再派工。
-- 默认脏活（高频扫描、只读校验、长日志定位）派 `flash`（3.8f）子代理（全局 [flash-verifier](<file:///<YOUR_PATH>/.gemini/config/plugins/anyi-global-rules/agents/flash-verifier.md>)）；需深度推理或代码施工的子任务用 `Model: "inherit"`。
+- 任务涉及子代理分工、只读验证/日志筛查/哈希对账、跨模块检索、隔离实验，或需通过 MCP 桥驱动外部 Agent 时，先读 [multi-agent-orchestrator Skill](./config/plugins/anyi-global-rules/skills/multi-agent-orchestrator/SKILL.md) 再派工。
+- 默认脏活（高频扫描、只读校验、长日志定位）派 `flash`（3.8f）子代理（全局 [flash-verifier](./config/plugins/anyi-global-rules/agents/flash-verifier.md)）；需深度推理或代码施工的子任务用 `Model: "inherit"`。
 
 ## 共享待办入口（可选）
 

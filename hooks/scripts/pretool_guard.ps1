@@ -6,21 +6,26 @@
 #            {"toolCall":{"name":"run_command","args":{"CommandLine":"npm test"}},
 #             "conversationId":"...", "stepIdx":19}
 #   stdout : exactly ONE JSON object, nothing else.
-#            {"decision":"allow"}
+#            {"decision":"ask"}               (default for non-flagged commands)
+#            {"decision":"allow"}             (opt-in via AGY_HOOK_DEFAULT_DECISION=allow)
 #            {"decision":"deny","reason":"..."}
 #
 # DESIGN NOTES
 #   1. ASCII-ONLY SOURCE. Never add non-ASCII characters to this file.
 #      Reason: Windows PowerShell 5.1 parses BOM-less scripts as ANSI, and
-#      this path contains non-ASCII directory names. Keeping the source pure
+#      this path may contain non-ASCII directory names. Keeping the source pure
 #      ASCII removes the whole class of encoding faults.
-#   2. FAIL-OPEN. Any internal error -> {"decision":"allow"}.
-#      A broken guard must never wedge the agent loop (hooks are synchronous).
-#   3. "allow" is emitted for every non-flagged command. That matches the
-#      current Antigravity setting autoExecutionPolicy=EAGER (Turbo), where
-#      run_command is auto-executed anyway. IF YOU EVER SWITCH TO AN
-#      ASK-FIRST POLICY, this hook must be changed too, otherwise it will
-#      keep silently auto-approving commands.
+#   2. SAFE DEFAULT ("ask"). Non-flagged commands return {"decision":"ask"} by
+#      default so the hook never auto-approves commands behind the user's back
+#      under Ask-First policy. Users who want hook-level auto-approval can set
+#      AGY_HOOK_DEFAULT_DECISION=allow.
+#   3. FAIL-OPEN TO DEFAULT DECISION. Any internal error returns the default
+#      decision ("ask" unless overridden) so a broken guard never wedges the
+#      synchronous agent loop.
+#   4. PRIVACY & SECRET REDACTION IN AUDIT LOG. By default, hook_log.jsonl only
+#      records blocked (DENY-DANGER) and error (ERROR-FAILOPEN) events (set
+#      AGY_HOOK_LOG_ALL=1 to log allowed/asked commands). All logged command
+#      strings are scrubbed for tokens, passwords, and API keys before writing.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'
@@ -34,9 +39,13 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $logFile   = Join-Path $scriptDir 'hook_log.jsonl'
 $stateDir  = Join-Path $scriptDir 'state'
 
-$ALLOW       = '{"decision":"allow"}'
-$result      = $ALLOW
-# Efficiency accounting is handled by read_loop_guard.cjs.
+$defaultMode = 'ask'
+if ($env:AGY_HOOK_DEFAULT_DECISION -match '^(allow|ask)$') {
+    $defaultMode = $env:AGY_HOOK_DEFAULT_DECISION.ToLowerInvariant()
+}
+$DEFAULT_PASS = '{"decision":"' + $defaultMode + '"}'
+$result       = $DEFAULT_PASS
+$logAll       = ($env:AGY_HOOK_LOG_ALL -match '^(1|true|yes)$')
 
 function Write-Utf8NoBom([string]$Path, [string]$Text, [bool]$Append) {
     $enc = New-Object System.Text.UTF8Encoding($false)
@@ -47,16 +56,46 @@ function Write-Utf8NoBom([string]$Path, [string]$Text, [bool]$Append) {
     }
 }
 
+function Redact-Command([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return '' }
+    $s = $Text
+    # Redact URL user:password@
+    $s = [regex]::Replace($s, '(https?://[^/\s:@]+:)[^/\s@]+(@)', '$1<REDACTED>$2', 'IgnoreCase')
+    # Redact Authorization: Bearer / Basic / Token headers
+    $s = [regex]::Replace($s, '(Authorization\s*:\s*(?:Bearer|Basic|Token)\s+)[^\s"''`]+', '$1<REDACTED>', 'IgnoreCase')
+    # Redact well-known token prefixes (OpenAI/Anthropic sk-, GitHub ghp_/github_pat_, Google AIza, Slack xox*)
+    $s = [regex]::Replace($s, '\b(sk-[a-zA-Z0-9_-]{10,}|gh[pousr]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[a-zA-Z0-9-]{10,}|ak-[a-zA-Z0-9]{16,})\b', '<REDACTED_TOKEN>')
+    # Redact CLI flags carrying secrets (--token, --password, --api-key, --secret, etc.)
+    $s = [regex]::Replace($s, '(--?(?:token|password|passwd|secret|api-?key|access-?key|private-?key|auth-?token|client-?secret))(\s+|=)("[^"]*"|''[^'']*''|\S+)', '$1$2<REDACTED>', 'IgnoreCase')
+    # Redact ENV_VAR=secret assignments
+    $s = [regex]::Replace($s, '\b([A-Za-z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)[A-Za-z0-9_]*)=("[^"]*"|''[^'']*''|\S+)', '$1=<REDACTED>', 'IgnoreCase')
+    if ($s.Length -gt 500) {
+        $s = $s.Substring(0, 500) + '...(truncated)'
+    }
+    return $s
+}
+
+function Mask-DataQuotes([string]$CmdText) {
+    if ([string]::IsNullOrWhiteSpace($CmdText)) { return '' }
+    $eval = {
+        param($m)
+        $seg = $m.Value
+        # Strip single-quoted literal strings (no shell expansion inside single quotes)
+        $seg = [regex]::Replace($seg, '''[^'']*''', '''''')
+        # Strip double-quoted literal strings that do not contain $( or ` command substitution
+        $seg = [regex]::Replace($seg, '"(?:\\.|[^"$`\\])*"', '""')
+        return $seg
+    }
+    $out = $CmdText
+    # 1. Search / print commands where quoted strings are pattern/text data, not subshell code
+    $out = [regex]::Replace($out, '(^|[\s;&|(])(grep|egrep|fgrep|rg|ripgrep|ag|ack|Select-String|echo|printf|Write-Host|Write-Output)\b[^;&|\r\n]*', $eval, 'IgnoreCase')
+    # 2. Git commit / tag / notes / merge commands where -m "..." is a commit/tag message
+    $out = [regex]::Replace($out, '(^|[\s;&|(])git(\.exe)?\b[^;&|\r\n]*\b(commit|tag|notes|merge)\b[^;&|\r\n]*', $eval, 'IgnoreCase')
+    return $out
+}
+
 try {
     # --- stdin: decode STRICTLY as UTF-8 -----------------------------------
-    # Antigravity writes the hook payload as raw UTF-8 bytes. PowerShell 5.1
-    # would otherwise decode [Console]::In using the OEM code page (GBK / 936
-    # on zh-CN Windows). Non-ASCII bytes - e.g. the Chinese user name in
-    # C:\Users\<chinese>\... - then get mangled mid-sequence, and the byte
-    # that follows a backslash can be swallowed into a double-byte GBK char.
-    # That turns a legal JSON escape into an illegal one and the whole parse
-    # fails. Reading the raw standard-input stream with an explicit UTF-8
-    # decoder bypasses the console code page entirely.
     $reader = New-Object System.IO.StreamReader(
         [Console]::OpenStandardInput(),
         (New-Object System.Text.UTF8Encoding($false)))
@@ -74,6 +113,13 @@ try {
     if ([string]::IsNullOrWhiteSpace($conv)) { $conv = 'default' }
     if ([string]::IsNullOrWhiteSpace($cmd))  { $cmd  = '' }
 
+    # Mask quoted data arguments in grep/rg/echo/git-commit so patterns like
+    # grep -rn "rm -rf" scripts/ or git commit -m "fix rm -rf" are not false-flagged.
+    $maskedCmd = Mask-DataQuotes $cmd
+
+    # Git prefix allowing global options (-C <dir>, -c <k=v>, --git-dir=..., --work-tree=..., etc.)
+    $gitPrefix = '(^|[\s;&|("''`])git(\.exe)?\s+(?:-[Cc]\s+\S+\s+|--(?:git-dir|work-tree|namespace|super-prefix|exec-path)(?:=\S+|\s+\S+)\s+|--(?:bare|no-pager|no-replace-objects|literal-pathspecs)\s+)*'
+
     # ------------------------------------------------------------------
     # 1) Dangerous-command hard block
     # ------------------------------------------------------------------
@@ -81,27 +127,26 @@ try {
     $why    = ''
 
     $rules = @(
-        @{ rx = 'Remove-Item.*-Recurse.*-Force';                    why = 'recursive force delete' },
-        @{ rx = 'Remove-Item.*-Force.*-Recurse';                    why = 'recursive force delete' },
-        @{ rx = '(^|[^a-zA-Z])(Remove-Item|ri|rm|del|erase|rd|rmdir)\b.*(\s-(r|recurse)\b).*(\s-(fo|force)\b)'; why = 'recursive force delete (PS alias/short-param)' },
-        @{ rx = '(^|[^a-zA-Z])(Remove-Item|ri|rm|del|erase|rd|rmdir)\b.*(\s-(fo|force)\b).*(\s-(r|recurse)\b)'; why = 'recursive force delete (PS alias/short-param)' },
-        @{ rx = '(^|[^a-zA-Z])rm\s+-[a-zA-Z]*r[a-zA-Z]*f';           why = 'rm -rf' },
-        @{ rx = '(^|[^a-zA-Z])rm\s+-[a-zA-Z]*f[a-zA-Z]*r';           why = 'rm -fr' },
-        @{ rx = '(^|[^a-zA-Z])rm\b.*(\s(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b).*(\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\b)'; why = 'rm -r -f / --recursive --force' },
-        @{ rx = '(^|[^a-zA-Z])rm\b.*(\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\b).*(\s(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\b)'; why = 'rm -f -r / --force --recursive' },
+        @{ rx = 'Remove-Item\b[^;&|\r\n]*\s-(r|recurse)\b';          why = 'recursive delete (Remove-Item -Recurse)' },
+        @{ rx = '(^|[^a-zA-Z0-9_-])(Remove-Item|ri|rm|del|erase|rd|rmdir)\b[^;&|\r\n]*(\s-(r|recurse)\b)'; why = 'recursive delete (PS alias/short-param)' },
+        @{ rx = '(^|[\s;&|("''`])rm\s+(-[a-zA-Z]*[rR]|--recursive\b|[^;&|\r\n]*\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b)'; why = 'rm -r / --recursive' },
+        @{ rx = '(^|[\s;&|("''`])find\b[^;&|\r\n]*\s(-delete\b|-exec(dir)?\s+(rm|rmdir)\b)'; why = 'find -delete / -exec rm' },
+        @{ rx = '(^|[\s;&|("''`])(python3?|node|nodejs|perl|ruby)(\.exe)?\b[^\r\n]*\b(shutil\.rmtree|os\.(remove|unlink|rmdir|removedirs)|fs\.(rmSync|rmdirSync|unlinkSync)|FileUtils\.(rm_rf|remove_dir)|remove_tree)\b'; why = 'interpreter one-liner destructive delete' },
         @{ rx = '(^|\s)rd\s+/s';                                     why = 'rd /s' },
         @{ rx = '(^|\s)rmdir\s+/s';                                  why = 'rmdir /s' },
         @{ rx = '(^|\s)del\s+/[a-zA-Z]*[fs]';                        why = 'del /f /s' },
-        @{ rx = 'git\s+reset\s+--hard';                              why = 'git reset --hard' },
-        @{ rx = 'git\s+push.*(--force|[^a-zA-Z]-f([^a-zA-Z]|$))';    why = 'git push --force' },
-        @{ rx = 'git\s+clean\s+-[a-zA-Z]*[fd]';                      why = 'git clean -fd' },
+        @{ rx = $gitPrefix + 'reset\b[^;&|\r\n]*\s--hard\b';         why = 'git reset --hard' },
+        @{ rx = $gitPrefix + 'push\b[^;&|\r\n]*(\s--force(?![-a-zA-Z])|\s-[a-zA-Z]*f\b|\s\+[a-zA-Z0-9_./-]+)'; why = 'git push --force / +refspec' },
+        @{ rx = $gitPrefix + 'clean\b[^;&|\r\n]*\s(-[a-zA-Z]*[fd]|--force\b)'; why = 'git clean -fd' },
+        @{ rx = $gitPrefix + 'checkout\b[^;&|\r\n]*(\s--\s*(\.|\*)(\s|$)|\s(-f|--force)\b)'; why = 'git checkout -- . / --force' },
+        @{ rx = $gitPrefix + 'restore\b(?![^;&|\r\n]*\s(-S|--staged)\b(?![^;&|\r\n]*\s(-W|--worktree)\b))[^;&|\r\n]*(\s(\.|\*)(\s|$)|\s(-W|--worktree)\b)'; why = 'git restore working tree' },
         @{ rx = 'Format-Volume';                                     why = 'Format-Volume' },
         @{ rx = '(^|\s)format\s+[a-zA-Z]:';                          why = 'format drive' },
         @{ rx = 'Remove-Item.*HKLM:';                                why = 'registry delete (HKLM)' },
         @{ rx = '(^|\s)reg\s+delete';                                why = 'reg delete' },
         @{ rx = 'Clear-Disk|Initialize-Disk';                        why = 'disk re-init' },
-        # --- Proxy / network protection (user directive 2026-09-26: proxy/network
-        #     is OFF-LIMITS without explicit per-task user approval) -----------
+        # --- Proxy / network protection (user rule: proxy/network is OFF-LIMITS
+        #     without explicit per-task user approval) --------------------------
         @{ rx = '(taskkill|tskill|pkill|killall|Stop-Process|wmic\s+process).{0,120}(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|netch|sstap|shadowsocks|trojan(-go)?|hysteria|naiveproxy|cfw|sysproxy|privoxy)'; why = 'kill proxy client (user rule: proxy/network off-limits without explicit user approval)' },
         @{ rx = '(clash|verge|mihomo|sing-?box|singbox|v2ray|xray|nekobox|nekoray|shadowsocks|hysteria).{0,120}(Stop-Process|taskkill|\.Kill\()'; why = 'kill proxy client (user rule: proxy/network off-limits without explicit user approval)' },
         @{ rx = '(sc(\.exe)?\s+(stop|delete|config)|net(\.exe)?\s+stop|Stop-Service).{0,120}(clash|sing-?box|v2ray|xray|wintun|tap-windows|tun2socks|shadowsocks|verge|nekobox)'; why = 'stop/delete proxy service (user rule: proxy/network off-limits without explicit user approval)' },
@@ -115,11 +160,9 @@ try {
     )
 
     foreach ($r in $rules) {
-        if ($cmd -match $r.rx) { $danger = $true; $why = $r.why; break }
+        if ($maskedCmd -match $r.rx) { $danger = $true; $why = $r.why; break }
     }
 
-    # Efficiency diagnostics are separate from dangerous-command gating.
-    # Legacy path regexes counted failed attempts and URL fragments.
     $count = 0
 
     # ------------------------------------------------------------------
@@ -130,32 +173,34 @@ try {
     }
 
     # ------------------------------------------------------------------
-    # 4) Audit log (best effort, never fatal)
+    # 4) Audit log (best effort, never fatal; default logs DENY only + redacts secrets)
     # ------------------------------------------------------------------
-    try {
-        if (Test-Path $logFile) {
-            if ((Get-Item $logFile).Length -gt 524288) {
-                $rotFile = $logFile + '.1'
-                if (Test-Path $rotFile) { Remove-Item $rotFile -Force }
-                Move-Item $logFile $rotFile -Force
+    if ($danger -or $logAll) {
+        try {
+            if (Test-Path $logFile) {
+                if ((Get-Item $logFile).Length -gt 524288) {
+                    $rotFile = $logFile + '.1'
+                    if (Test-Path $rotFile) { Remove-Item $rotFile -Force }
+                    Move-Item $logFile $rotFile -Force
+                }
             }
-        }
-        $verdict = 'ALLOW'
-        if ($danger) { $verdict = 'DENY-DANGER' }
+            $verdict = $defaultMode.ToUpperInvariant()
+            if ($danger) { $verdict = 'DENY-DANGER' }
 
-        $rec = [ordered]@{
-            ts      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-            verdict = $verdict
-            count   = $count
-            tool    = $tool
-            cmd     = $cmd
-        } | ConvertTo-Json -Compress
+            $rec = [ordered]@{
+                ts      = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+                verdict = $verdict
+                count   = $count
+                tool    = $tool
+                cmd     = (Redact-Command $cmd)
+            } | ConvertTo-Json -Compress
 
-        Write-Utf8NoBom -Path $logFile -Text ($rec + "`r`n") -Append $true
-    } catch { }
+            Write-Utf8NoBom -Path $logFile -Text ($rec + "`r`n") -Append $true
+        } catch { }
+    }
 }
 catch {
-    $result = $ALLOW
+    $result = $DEFAULT_PASS
     try {
         $msg = [string]$_.Exception.Message
         $msg = $msg -replace '[\r\n]+', ' '

@@ -10,20 +10,22 @@
 //            {"toolCall":{"name":"run_command","args":{"CommandLine":"npm test"}},
 //             "conversationId":"...", "stepIdx":19}
 //   stdout : exactly ONE JSON object, nothing else.
-//            {"decision":"allow"}
+//            {"decision":"ask"}               (default for non-flagged commands)
+//            {"decision":"allow"}             (opt-in via AGY_HOOK_DEFAULT_DECISION=allow)
 //            {"decision":"deny","reason":"..."}
 //
 // DESIGN NOTES
-//   1. FAIL-OPEN. Any internal error -> {"decision":"allow"}.
-//      A broken guard must never wedge the agent loop (hooks are synchronous).
-//   2. "allow" is emitted for every non-flagged command, matching
-//      autoExecutionPolicy=EAGER (Turbo). IF YOU EVER SWITCH TO AN ASK-FIRST
-//      POLICY, this hook must be changed too, otherwise it will keep silently
-//      auto-approving commands.
-//   3. stdin is read as raw bytes and decoded as UTF-8, so the console code
-//      page never matters (the GBK issue handled in the .ps1 does not apply).
-//   4. Matching is case-insensitive, same as PowerShell's -match.
-//   5. WINDOWS_RULES mirror pretool_guard.ps1 one-to-one. Keep them in sync.
+//   1. SAFE DEFAULT ("ask"). Non-flagged commands return {"decision":"ask"} by
+//      default so the hook never auto-approves commands behind the user's back
+//      under Ask-First policy. Set AGY_HOOK_DEFAULT_DECISION=allow to opt into
+//      hook-level auto-approval.
+//   2. FAIL-OPEN TO DEFAULT DECISION. Any internal error returns the default
+//      decision ("ask" unless overridden).
+//   3. PRIVACY & SECRET REDACTION IN AUDIT LOG. By default, hook_log.jsonl only
+//      records blocked (DENY-DANGER) and error (ERROR-FAILOPEN) events (set
+//      AGY_HOOK_LOG_ALL=1 to also log allowed/asked commands). All logged
+//      commands are scrubbed for tokens, passwords, and API keys.
+//   4. WINDOWS_RULES mirror pretool_guard.ps1 one-to-one. Keep them in sync.
 //      UNIX_RULES are extra rules for macOS / Linux commands.
 // ============================================================================
 
@@ -34,27 +36,34 @@ const SCRIPT_DIR = __dirname;
 const LOG_FILE = path.join(SCRIPT_DIR, 'hook_log.jsonl');
 const LOG_ROTATE_BYTES = 524288;
 const EOL = process.platform === 'win32' ? '\r\n' : '\n';
-const ALLOW = '{"decision":"allow"}';
+
+const DEFAULT_MODE = /^(allow|ask)$/i.test(process.env.AGY_HOOK_DEFAULT_DECISION || '')
+  ? process.env.AGY_HOOK_DEFAULT_DECISION.toLowerCase()
+  : 'ask';
+const DEFAULT_PASS = JSON.stringify({ decision: DEFAULT_MODE });
+const LOG_ALL = /^(1|true|yes)$/i.test(process.env.AGY_HOOK_LOG_ALL || '');
 
 const PROXY_RULE = 'user rule: proxy/network off-limits without explicit user approval';
 const NETWORK_RULE = 'user rule: network off-limits without explicit user approval';
 
-// Mirrors pretool_guard.ps1 lines 84-114.
+// Git prefix allowing global options (-C <dir>, -c <k=v>, --git-dir=..., --work-tree=..., etc.)
+const GIT_PREFIX = '(^|[\\s;&|("\'`])git(\\.exe)?\\s+(?:-[Cc]\\s+\\S+\\s+|--(?:git-dir|work-tree|namespace|super-prefix|exec-path)(?:=\\S+|\\s+\\S+)\\s+|--(?:bare|no-pager|no-replace-objects|literal-pathspecs)\\s+)*';
+
+// Mirrors pretool_guard.ps1 rules one-to-one.
 const WINDOWS_RULES = [
-  ['Remove-Item.*-Recurse.*-Force', 'recursive force delete'],
-  ['Remove-Item.*-Force.*-Recurse', 'recursive force delete'],
-  ['(^|[^a-zA-Z])(Remove-Item|ri|rm|del|erase|rd|rmdir)\\b.*(\\s-(r|recurse)\\b).*(\\s-(fo|force)\\b)', 'recursive force delete (PS alias/short-param)'],
-  ['(^|[^a-zA-Z])(Remove-Item|ri|rm|del|erase|rd|rmdir)\\b.*(\\s-(fo|force)\\b).*(\\s-(r|recurse)\\b)', 'recursive force delete (PS alias/short-param)'],
-  ['(^|[^a-zA-Z])rm\\s+-[a-zA-Z]*r[a-zA-Z]*f', 'rm -rf'],
-  ['(^|[^a-zA-Z])rm\\s+-[a-zA-Z]*f[a-zA-Z]*r', 'rm -fr'],
-  ['(^|[^a-zA-Z])rm\\b.*(\\s(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\\b).*(\\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\\b)', 'rm -r -f / --recursive --force'],
-  ['(^|[^a-zA-Z])rm\\b.*(\\s(-[a-zA-Z]*f[a-zA-Z]*|--force)\\b).*(\\s(-[a-zA-Z]*r[a-zA-Z]*|--recursive)\\b)', 'rm -f -r / --force --recursive'],
+  ['Remove-Item\\b[^;&|\\r\\n]*\\s-(r|recurse)\\b', 'recursive delete (Remove-Item -Recurse)'],
+  ['(^|[^a-zA-Z0-9_-])(Remove-Item|ri|rm|del|erase|rd|rmdir)\\b[^;&|\\r\\n]*(\\s-(r|recurse)\\b)', 'recursive delete (PS alias/short-param)'],
+  ['(^|[\\s;&|("\'`])rm\\s+(-[a-zA-Z]*[rR]|--recursive\\b|[^;&|\\r\\n]*\\s(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\\b)', 'rm -r / --recursive'],
+  ['(^|[\\s;&|("\'`])find\\b[^;&|\\r\\n]*\\s(-delete\\b|-exec(dir)?\\s+(rm|rmdir)\\b)', 'find -delete / -exec rm'],
+  ['(^|[\\s;&|("\'`])(python3?|node|nodejs|perl|ruby)(\\.exe)?\\b[^\\r\\n]*\\b(shutil\\.rmtree|os\\.(remove|unlink|rmdir|removedirs)|fs\\.(rmSync|rmdirSync|unlinkSync)|FileUtils\\.(rm_rf|remove_dir)|remove_tree)\\b', 'interpreter one-liner destructive delete'],
   ['(^|\\s)rd\\s+/s', 'rd /s'],
   ['(^|\\s)rmdir\\s+/s', 'rmdir /s'],
   ['(^|\\s)del\\s+/[a-zA-Z]*[fs]', 'del /f /s'],
-  ['git\\s+reset\\s+--hard', 'git reset --hard'],
-  ['git\\s+push.*(--force|[^a-zA-Z]-f([^a-zA-Z]|$))', 'git push --force'],
-  ['git\\s+clean\\s+-[a-zA-Z]*[fd]', 'git clean -fd'],
+  [GIT_PREFIX + 'reset\\b[^;&|\\r\\n]*\\s--hard\\b', 'git reset --hard'],
+  [GIT_PREFIX + 'push\\b[^;&|\\r\\n]*(\\s--force(?![-a-zA-Z])|\\s-[a-zA-Z]*f\\b|\\s\\+[a-zA-Z0-9_./-]+)', 'git push --force / +refspec'],
+  [GIT_PREFIX + 'clean\\b[^;&|\\r\\n]*\\s(-[a-zA-Z]*[fd]|--force\\b)', 'git clean -fd'],
+  [GIT_PREFIX + 'checkout\\b[^;&|\\r\\n]*(\\s--\\s*(\\.|\\*)(\\s|$)|\\s(-f|--force)\\b)', 'git checkout -- . / --force'],
+  [GIT_PREFIX + 'restore\\b(?![^;&|\\r\\n]*\\s(-S|--staged)\\b(?![^;&|\\r\\n]*\\s(-W|--worktree)\\b))[^;&|\\r\\n]*(\\s(\\.|\\*)(\\s|$)|\\s(-W|--worktree)\\b)', 'git restore working tree'],
   ['Format-Volume', 'Format-Volume'],
   ['(^|\\s)format\\s+[a-zA-Z]:', 'format drive'],
   ['Remove-Item.*HKLM:', 'registry delete (HKLM)'],
@@ -100,9 +109,36 @@ const UNIX_RULES = [
 
 const RULES = [...WINDOWS_RULES, ...UNIX_RULES].map(([rx, why]) => ({ rx: new RegExp(rx, 'i'), why }));
 
+function stripSegmentQuotes(seg) {
+  return seg
+    .replace(/'[^']*'/g, "''")
+    .replace(/"(?:\\.|[^"$`\\])*"/g, '""');
+}
+
+function maskDataQuotes(cmd) {
+  if (!cmd) return '';
+  let out = cmd;
+  out = out.replace(/(^|[\s;&|(])(grep|egrep|fgrep|rg|ripgrep|ag|ack|Select-String|echo|printf|Write-Host|Write-Output)\b[^;&|\r\n]*/gi, stripSegmentQuotes);
+  out = out.replace(/(^|[\s;&|(])git(\.exe)?\b[^;&|\r\n]*\b(commit|tag|notes|merge)\b[^;&|\r\n]*/gi, stripSegmentQuotes);
+  return out;
+}
+
+function redactCmd(text) {
+  if (!text) return '';
+  let s = String(text);
+  s = s.replace(/(https?:\/\/[^/\s:@]+:)[^/\s@]+(@)/gi, '$1<REDACTED>$2');
+  s = s.replace(/(Authorization\s*:\s*(?:Bearer|Basic|Token)\s+)[^\s"'`]+/gi, '$1<REDACTED>');
+  s = s.replace(/\b(sk-[a-zA-Z0-9_-]{10,}|gh[pousr]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AIza[0-9A-Za-z_-]{20,}|xox[baprs]-[a-zA-Z0-9-]{10,}|ak-[a-zA-Z0-9]{16,})\b/g, '<REDACTED_TOKEN>');
+  s = s.replace(/(--?(?:token|password|passwd|secret|api-?key|access-?key|private-?key|auth-?token|client-?secret))(\s+|=)("[^"]*"|'[^']*'|\S+)/gi, '$1$2<REDACTED>');
+  s = s.replace(/\b([A-Za-z0-9_]*(?:TOKEN|PASSWORD|PASSWD|SECRET|API_KEY|PRIVATE_KEY|ACCESS_KEY|CREDENTIAL)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, '$1=<REDACTED>');
+  if (s.length > 500) s = s.slice(0, 500) + '...(truncated)';
+  return s;
+}
+
 function check(cmd) {
+  const masked = maskDataQuotes(cmd);
   for (const r of RULES) {
-    if (r.rx.test(cmd)) return r.why;
+    if (r.rx.test(masked)) return r.why;
   }
   return null;
 }
@@ -123,7 +159,7 @@ function appendLog(record) {
 }
 
 function main(raw) {
-  let result = ALLOW;
+  let result = DEFAULT_PASS;
   try {
     if (!raw.trim()) throw new Error('empty stdin');
     const payload = JSON.parse(raw);
@@ -137,9 +173,17 @@ function main(raw) {
         reason: 'HARD GATE: blocked - ' + why + ' (global rule 1/9). Report to the user instead of retrying a variant.',
       });
     }
-    appendLog({ ts: stamp(), verdict: why ? 'DENY-DANGER' : 'ALLOW', count: 0, tool, cmd });
+    if (why || LOG_ALL) {
+      appendLog({
+        ts: stamp(),
+        verdict: why ? 'DENY-DANGER' : DEFAULT_MODE.toUpperCase(),
+        count: 0,
+        tool,
+        cmd: redactCmd(cmd),
+      });
+    }
   } catch (err) {
-    result = ALLOW;
+    result = DEFAULT_PASS;
     appendLog({ ts: stamp(), verdict: 'ERROR-FAILOPEN', error: String(err && err.message ? err.message : err).replace(/[\r\n]+/g, ' ') });
   }
   process.stdout.write(result);
@@ -152,4 +196,4 @@ if (require.main === module) {
   process.stdin.on('error', () => main(''));
 }
 
-module.exports = { check, WINDOWS_RULES, UNIX_RULES };
+module.exports = { check, maskDataQuotes, redactCmd, WINDOWS_RULES, UNIX_RULES };

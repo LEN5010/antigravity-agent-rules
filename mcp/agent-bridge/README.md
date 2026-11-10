@@ -12,10 +12,13 @@
 |---|---|
 | 编写 | 2026-11-09，由作者使用的编码 Agent 按需求新写，不是从别的仓库拷来的 |
 | 版权 | 作者原创实现，随仓库根 [MIT License](../../LICENSE) 发布 |
-| 验证状态 | `verify.mjs` 用假后端跑 **32 项协议断言，32/32 通过**，不联网、不需要真 CLI；**尚未接入任何真实后端跑通端到端** |
-| 姊妹实现 | 同仓库 [`../dsh-crew`](../dsh-crew)：DSH 专用，**已在真机跑通 6/6**，可当作「接真实后端该长什么样」的参照 |
+| 验证状态 | `verify.mjs` 用假后端跑 **32 项协议断言，32/32 通过**，不联网、不需要真 CLI；**尚未接入任何真实后端跑通端到端（`NOT_PROVEN`）** |
+| 姊妹实现 | 同仓库 [`../dsh-bridge`](../dsh-bridge)（原目录名 `dsh-crew`，自 0.2.0 起改名为 `dsh-bridge` 以免与社区 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew) 重名）：DSH Headless 专用，**已在真机跑通 6/6** |
 
-一句话取舍：**只接 DSH 就用 `../dsh-crew`（已验证）；后端要换、或只想一层薄封装，用本桥——但请自己先跑一遍真实后端再上生产。**
+一句话取舍：
+- **只接 DSH Headless（单文件零依赖）**：用同仓库 [`../dsh-bridge`](../dsh-bridge)（已真机验证）。
+- **需要异步多 Worker 池、进度轮询、cwd 咨询锁或 GUI CDP 验收**：直接用社区成熟项目 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew)（MIT）或 [`lanlan0811/tianshu-mcp`](https://github.com/lanlan0811/tianshu-mcp)（Apache-2.0）。
+- **后端要换、或只想一层可插拔薄封装**：用本桥——但请自己先跑一遍真实后端再上生产。
 
 ---
 
@@ -25,15 +28,13 @@
 
 本桥的取舍：
 
-| | 本桥 | 常见的成套插件 |
+| | 本桥 (`agent-bridge`) | 社区成套插件（如 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew)） |
 |---|---|---|
 | 依赖 | 0（仅 Node 内建模块） | 通常带 MCP SDK、参数校验库等 |
 | 后端绑定 | 无，`BRIDGE_CMD` 指谁就是谁 | 一般绑定特定产品 |
 | 工具面 | 4 个（派活 / 列表 / 自检 / 遗忘） | 6~10+ 个，含异步任务与并行 |
 | 可审计 | 单文件约 500 行，读完就懂 | 需要读整个包结构 |
 | 适合 | 想完全掌控、后端随便换 | 想开箱即用、要并行与进度 |
-
-需要异步 job、进度轮询、多模态时，请去找对应产品的成套插件，别用这个。
 
 ---
 

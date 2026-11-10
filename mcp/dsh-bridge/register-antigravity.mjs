@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * 把 dsh-crew 注册进 Antigravity 的全局 MCP 配置（改前自动备份）。
+ * 把 dsh-bridge 注册进 Antigravity 的全局 MCP 配置（改前自动备份）。
+ * 使用独立的键名 mcpServers['dsh-bridge']，绝不覆盖第三方项目 ZSeven-W/dsh-crew 的 mcpServers['dsh-crew']。
  *
  * 用法：
  *   node register-antigravity.mjs                 # 不设工作区，交给宿主 cwd
@@ -19,11 +20,11 @@ const CONFIG = path.join(os.homedir(), '.gemini', 'config', 'mcp_config.json');
 const BACKUP_DIR = path.join(HERE, 'backups');
 const ENTRY = {
   command: process.execPath,
-  args: [path.join(HERE, 'dsh-crew.mjs'), 'mcp'],
+  args: [path.join(HERE, 'dsh-bridge.mjs'), 'mcp'],
 };
 
 const workspace = process.argv[2];
-if (workspace) ENTRY.env = { DSH_CREW_WORKSPACE: workspace };
+if (workspace) ENTRY.env = { DSH_BRIDGE_WORKSPACE: workspace };
 
 if (!fs.existsSync(CONFIG)) {
   console.error('未找到 Antigravity MCP 配置：' + CONFIG);
@@ -40,7 +41,7 @@ fs.mkdirSync(BACKUP_DIR, { recursive: true });
 const backup = path.join(BACKUP_DIR, 'antigravity-mcp-config-' + ts + '.bak');
 fs.writeFileSync(backup, raw, 'utf8');
 
-cfg.mcpServers['dsh-crew'] = ENTRY;
+cfg.mcpServers['dsh-bridge'] = ENTRY;
 const next = JSON.stringify(cfg, null, 2) + '\n';
 fs.writeFileSync(CONFIG, next, 'utf8');
 
@@ -49,5 +50,5 @@ const check = JSON.parse(fs.readFileSync(CONFIG, 'utf8'));
 console.log('CONFIG: ' + CONFIG);
 console.log('BACKUP: ' + backup);
 console.log('SERVERS: ' + Object.keys(check.mcpServers).join(', '));
-console.log('DSH_CREW_ENTRY: ' + JSON.stringify(check.mcpServers['dsh-crew']));
-console.log('提示：重启 Antigravity 或新开对话后，MCP 面板才会出现 dsh-crew。');
+console.log('DSH_BRIDGE_ENTRY: ' + JSON.stringify(check.mcpServers['dsh-bridge']));
+console.log('提示：重启 Antigravity 或新开对话后，MCP 面板才会出现 dsh-bridge。');

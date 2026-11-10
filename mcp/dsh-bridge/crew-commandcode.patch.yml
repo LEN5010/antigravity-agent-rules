@@ -1,0 +1,15 @@
+# dsh-bridge：可选的模型补丁（默认不启用）
+# 注意：dsh-commandcode 属于非官方第三方 provider 插件，启用前请自行核实是否符合对应服务商（Command Code）的服务条款。
+# 仅当显式设置环境变量 DSH_BRIDGE_ENABLE_COMMANDCODE=1 且 DSH_BRIDGE_COMMANDCODE_PLUGIN
+# （默认 ~/.dsh/profiles/desktop/node_modules/dsh-commandcode/index.js）存在时，桥才会把本文件落盘并传给 headless；
+# 默认情况下不启用本补丁，直接沿用 DSH 自身的默认模型。
+- insert:
+    - id: commandcode-provider
+      name: '<COMMANDCODE_PLUGIN_URL>'
+      config:
+        include: 'glm-5.3, deepseek-v4.1'
+- id: agent-default-model
+  name: "@deepseek-ai/dsh-agent-default-model"
+  config:
+    provider: commandcode
+    model: deepseek/deepseek-v4.1-flash-fast

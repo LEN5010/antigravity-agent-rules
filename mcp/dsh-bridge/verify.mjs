@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * dsh-crew 端到端验收：用与 Antigravity 注册完全相同的命令行起 MCP server，
+ * dsh-bridge 端到端验收：用与 Antigravity 注册完全相同的命令行起 MCP server，
  * 走 initialize / tools/list / tools/call(dsh_status) / tools/call(dsh_ask) / tools/call(dsh_sessions)。
  *
  * 用法：
@@ -8,8 +8,8 @@
  *   node verify.mjs --offline  # 只验协议与自检，不启动 DSH
  *
  * 可用环境变量：
- *   DSH_CREW_WORKSPACE  指定 DSH 工作区（默认本进程 cwd）
- *   DSH_CREW_DSH_CMD    指定 DSH 启动器；不设则靠桥自动探测
+ *   DSH_BRIDGE_WORKSPACE  指定 DSH 工作区（默认本进程 cwd，兼容 DSH_CREW_WORKSPACE）
+ *   DSH_BRIDGE_DSH_CMD    指定 DSH 启动器；不设则靠桥自动探测
  */
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -19,9 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OFFLINE = process.argv.includes('--offline');
-const NODE = process.env.DSH_CREW_NODE || process.execPath;
-const BRIDGE = path.join(HERE, 'dsh-crew.mjs');
-const CWD = process.env.DSH_CREW_WORKSPACE || process.cwd();
+const NODE = process.env.DSH_BRIDGE_NODE || process.env.DSH_CREW_NODE || process.execPath;
+const BRIDGE = path.join(HERE, 'dsh-bridge.mjs');
+const CWD = process.env.DSH_BRIDGE_WORKSPACE || process.env.DSH_CREW_WORKSPACE || process.cwd();
 
 console.log('node:   ' + NODE + ' (' + process.version + ')');
 console.log('bridge: ' + BRIDGE);
@@ -31,7 +31,7 @@ console.log('模式:   ' + (OFFLINE ? 'offline（不启动 DSH）' : 'full（会
 
 const child = spawn(NODE, [BRIDGE, 'mcp'], {
   cwd: CWD,
-  env: Object.assign({}, process.env, { DSH_CREW_WORKSPACE: CWD }),
+  env: Object.assign({}, process.env, { DSH_BRIDGE_WORKSPACE: CWD }),
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 
@@ -93,7 +93,7 @@ try {
     capabilities: {},
     clientInfo: { name: 'antigravity-verify', version: '0.0.1' },
   }, 30000);
-  record('initialize', !!init.result && init.result.serverInfo && init.result.serverInfo.name === 'dsh-crew',
+  record('initialize', !!init.result && init.result.serverInfo && init.result.serverInfo.name === 'dsh-bridge',
     JSON.stringify(init.result && init.result.serverInfo));
   notify('notifications/initialized');
 
@@ -117,14 +117,14 @@ try {
     const ask = await request('tools/call', {
       name: 'dsh_ask',
       arguments: {
-        task: '用一句话回答：dsh-crew 桥接验收，请回复「crew-ok」并附上当前工作目录。不要修改任何文件。',
+        task: '用一句话回答：dsh-bridge 桥接验收，请回复「bridge-ok」并附上当前工作目录。不要修改任何文件。',
         session: 'verify',
         permission: 'read-only',
         timeout_ms: 300000,
       },
     }, 420000);
     const askText = textOf(ask);
-    record('tools/call dsh_ask (real DSH run)', !!ask.result && !ask.result.isError && /crew-ok/i.test(askText), askText.slice(0, 700));
+    record('tools/call dsh_ask (real DSH run)', !!ask.result && !ask.result.isError && /bridge-ok/i.test(askText), askText.slice(0, 700));
 
     // 5. 同一标签第二次调用：验证 --session-id 续聊
     const ask2 = await request('tools/call', {

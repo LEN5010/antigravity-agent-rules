@@ -5,7 +5,7 @@ description: 当任务涉及网络连通性排查、本地代理客户端状态�
 
 # 安全网络与代理只读诊断规范（safe-network-diagnostics）
 
-> 权威来源：继承自 [`~/.gemini/GEMINI.md`](file:///<YOUR_PATH>/.gemini/GEMINI.md)「用户代理与网络配置：未经许可一律只读」全局红线。命令行底层硬拦截位于 [`~/.gemini/config/scripts/pretool_guard.ps1`](file:///<YOUR_PATH>/.gemini/config/scripts/pretool_guard.ps1)（Windows）与 [`~/.gemini/config/scripts/pretool_guard.cjs`](file:///<YOUR_PATH>/.gemini/config/scripts/pretool_guard.cjs)（macOS / Linux）。
+> 权威来源：继承自 [`~/.gemini/GEMINI.md`](../../../../GEMINI.md)「用户代理与网络配置：未经许可一律只读」全局红线。命令行底层硬拦截位于 [`~/.gemini/config/scripts/pretool_guard.ps1`](../../../scripts/pretool_guard.ps1)（Windows）与 [`~/.gemini/config/scripts/pretool_guard.cjs`](../../../scripts/pretool_guard.cjs)（macOS / Linux）。
 
 ## 1. 绝对红线：未经当次明确许可，严禁任何写/停操作
 

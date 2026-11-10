@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0] - 2026-11-11
+
+- **解决 `dsh-crew` 重名与 `mcp_config.json` 覆盖冲突（重命名为 `mcp/dsh-bridge` v0.2.0）**：
+  - 将仓库内置的单文件 DSH Headless 包装桥从 `mcp/dsh-crew` 重命名为 `mcp/dsh-bridge`（脚本 `dsh-bridge.mjs`、注册键 `mcpServers['dsh-bridge']`、环境变量 `DSH_BRIDGE_*` 并向后兼容 `DSH_CREW_*`），避免与社区早在 2026 年 8 月开源的 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew)（MIT）撞名及互相覆盖 `~/.gemini/config/mcp_config.json` 中的 `mcpServers['dsh-crew']`。
+  - 在 `README.md`、`mcp/dsh-bridge/README.md` 与 `mcp/agent-bridge/README.md` 中坦诚说明 11 月 7 日生成脚本时的命名缘起，恢复对 [`ZSeven-W/dsh-crew`](https://github.com/ZSeven-W/dsh-crew) 与 [`lanlan0811/tianshu-mcp`](https://github.com/lanlan0811/tianshu-mcp) 的明确指向。
+  - **收紧跨 Agent 默认权限与凭据/插件边界**：`dsh_ask` 默认权限从 `workspace-write` 收紧为 `read-only`；明确说明 `crew-credentials.patch.yml` 的三行开关直接出自 `@deepseek-ai/dsh-headless` 官方 README「凭据」节并支持 `DSH_BRIDGE_DISABLE_CRED_PATCH=1` 关闭；将非官方第三方 `dsh-commandcode` 模型补丁改为默认不启用（需显式设 `DSH_BRIDGE_ENABLE_COMMANDCODE=1` 才叠加）并补充服务条款核实提示。
+- **Hook 守卫层（`pretool_guard.ps1` / `pretool_guard.cjs`）安全默认值、日志脱敏与正则防漏拦/防误拦升级**：
+  - **非黑名单默认决策改为 `"ask"`**：默认返回 `{"decision":"ask"}` 而非 `{"decision":"allow"}`，保留用户在 Ask-First 模式下的确认环节（如需 Hook 自动放行可通过环境变量 `AGY_HOOK_DEFAULT_DECISION=allow` 显式开启）。
+  - **审计日志最小化与密钥自动脱敏**：`hook_log.jsonl` 默认仅记录被拦截（`DENY-DANGER`）与解析故障（`ERROR-FAILOPEN`）事件（设 `AGY_HOOK_LOG_ALL=1` 才记录日常命令），并在落盘前对命令行中的 Bearer Token、`sk-*`/`ghp_*`/`github_pat_*`/`AIza*`、`--token`/`--password`/`--api-key` 及环境变量赋值中的密钥做正则脱敏（`<REDACTED>`）。
+  - **消除搜索与提交信息误拦（上下文引号掩码）**：对 `grep`/`egrep`/`fgrep`/`rg`/`ag`/`ack`/`Select-String`/`echo`/`printf` 及 `git commit`/`tag`/`notes`/`merge` 中不含 `$(` 或反引号命令替换的单双引号字面量先行掩码，消除 `grep -rn "rm -rf" scripts/` 与 `git commit -m "...rm -rf..."` 的误拦；同时放行安全的 `git push --force-with-lease` 与 `git restore --staged .`。
+  - **补齐高危命令漏拦**：支持 `git -C <dir>` / `-c k=v` / `--git-dir` / `--work-tree` 全局选项穿透，新增拦截 `git checkout -- .` / `-f`、`git restore .` / `--worktree`、`git push origin +main`（`+refspec` 强推）、不带 `-f` 的递归删除 `rm -r` / `Remove-Item -Recurse`、`find ... -delete` / `-exec rm` 以及 `python -c` / `node -e` 单行解释器删除。`verify-hook.py` 扩展至 Windows 52 项 / Node 90 项全绿断言，并在 README 中明确区分脚本离线自检与宿主真机挂载验证。
+- **规则去个人化、清理未替换占位符与修正 `Gemini 4 Carbon` 验证等级表述**：
+  - 移除 `global/GEMINI.md` 中的个人固定笔名「安钰」与 `global/plugin.json` 中的个人化描述，改为通用署名脱敏规则。
+  - 移除 `global/GEMINI.md`、`agents/flash-verifier.md`、`skills/client-maintenance/SKILL.md`、`skills/multi-agent-orchestrator/SKILL.md` 中残留的 `<YOUR_PROJECT_PATH>`、`<YOUR_MCP_SERVER>`、`<YOUR_DOMAIN_VERIFIER>`、`<YOUR_CHECK_SCRIPT>`、`<YOUR_PROJECT_REDLINES>`、`<YOUR_HEADLESS_MCP>`、`<YOUR_GUI_MCP>` 占位符及 `multi-agent-orchestrator` 中残留的一处“梯子”措辞（统一改为“用户代理与网络配置”）。
+  - 严格按 `VERIFIED / NOT_PROVEN` 纪律修正 `README.md` 模型适配矩阵：将 2026-11-10 刚上线的 `Gemini 4 Carbon` 从长期 `VERIFIED` 中单列为 `PRELIMINARY / PARTIALLY_VERIFIED`（上线首日初步适配，长周期 `/swarm` 压测标 `NOT_PROVEN`）。
+  - 更新 `LICENSE` 与 `README.md` 版权声明：补齐共创者 `len (LEN5010)` 的版权署名（`Copyright (c) 2026 安钰, len (LEN5010) and contributors`）。
+
 ## [1.2.3] - 2026-11-11
 
 - **放宽隔离工作树（`branch` / `share`）批量改动拦截**：

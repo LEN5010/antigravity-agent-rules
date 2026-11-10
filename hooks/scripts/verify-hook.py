@@ -1,5 +1,5 @@
 """
-verify-hook.py - self-test for the Antigravity PreToolUse guard.
+verify-hook.py - offline regression self-test for the Antigravity PreToolUse guard.
 
 Why this exists
 ---------------
@@ -8,13 +8,12 @@ as raw UTF-8 bytes, but Windows PowerShell 5.1 decodes stdin with the OEM code
 page (GBK/936 on zh-CN). Any non-ASCII byte - for example the Chinese user name
 in C:\\Users\\<cn>\\... - got mangled, and a byte following a backslash could be
 absorbed into a double-byte GBK character. That turned a legal JSON escape into
-an illegal one, the parse failed, and the guard silently fail-opened. A payload
-that is pure ASCII never showed the bug, so testing with English paths alone
-proves nothing.
+an illegal one, the parse failed, and the guard silently fail-opened.
 
-This script therefore feeds real UTF-8 payloads - including Chinese paths - and
-asserts the verdict. Run it after ANY change to pretool_guard.ps1 or
-pretool_guard.cjs.
+NOTE: This script feeds synthetic UTF-8 payloads to the guard script over stdin
+to verify regex rules, quote-masking, secret redaction, and UTF-8 decoding. It
+does NOT prove that the Antigravity host process has loaded hooks.json; see
+README.md for the live host verification step.
 
 Usage
 -----
@@ -22,10 +21,6 @@ Usage
     python3 verify-hook.py                # macOS / Linux: tests pretool_guard.cjs
     python verify-hook.py --guard node    # force the Node guard (any OS)
     python verify-hook.py --guard ps      # force the PowerShell guard
-
-The Node interpreter defaults to `node` on PATH; set NODE=/abs/path/to/node to
-override. SECTION 5 (macOS / Linux rules) only runs against the Node guard,
-because pretool_guard.ps1 does not carry those rules.
 
 Exit code 0 = all assertions passed, 1 = at least one failure.
 """
@@ -39,6 +34,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CASES = os.path.join(HERE, "test-cases.txt")
 LOG = os.path.join(HERE, "hook_log.jsonl")
 STATE = os.path.join(HERE, "state")
+
+PASS_DECISION = "ask"
 
 
 def pick_guard():
@@ -64,15 +61,18 @@ else:
     NODE = os.environ.get("NODE") or shutil.which("node") or "node"
     GUARD_CMD = [NODE, SCRIPT]
 
-CN = "\u6d4b\u8bd5\u7528\u6237"  # <YOUR_CN_USERNAME> Chinese user-name characters for UTF-8 test
+CN = "\u6d4b\u8bd5\u7528\u6237"  # Chinese user-name characters for UTF-8 test
 
 
 def call_guard(payload_obj):
     """Send a payload as UTF-8 bytes on stdin, return the parsed verdict."""
     raw = json.dumps(payload_obj, ensure_ascii=False).encode("utf-8")
+    env = os.environ.copy()
+    env.pop("AGY_HOOK_DEFAULT_DECISION", None)
+    env.pop("AGY_HOOK_LOG_ALL", None)
     proc = subprocess.run(
         GUARD_CMD,
-        input=raw, capture_output=True, timeout=90,
+        input=raw, capture_output=True, timeout=90, env=env,
     )
     text = proc.stdout.decode("utf-8", errors="replace").strip()
     try:
@@ -85,7 +85,6 @@ def payload(command, conversation="selftest", step=1, cwd=None):
     args = {"CommandLine": command}
     if cwd:
         args["Cwd"] = cwd
-    # Mirror the real shape Antigravity sends, including a Chinese path.
     return {
         "artifactDirectoryPath": "C:/Users/%s/.gemini/antigravity/brain/selftest" % CN,
         "conversationId": conversation,
@@ -127,23 +126,23 @@ def main():
     print("=" * 78)
     with open(CASES, encoding="utf-8") as fh:
         lines = [ln.strip() for ln in fh if ln.strip()]
-    allow_list = {"Get-ChildItem C:\\ | Select-Object Name", "node build.mjs", "npm test"}
+    pass_list = {"Get-ChildItem C:\\ | Select-Object Name", "node build.mjs", "npm test"}
     for i, cmd in enumerate(lines):
-        expected = "allow" if cmd in allow_list else "deny"
+        expected = PASS_DECISION if cmd in pass_list else "deny"
         check("case %02d" % (i + 1), cmd, expected, conversation="s1-%d" % i)
 
     print()
     print("=" * 78)
     print("SECTION 2  the encoding regression (Chinese path in the payload)")
     print("=" * 78)
-    check("benign + Chinese path", "echo hook-probe", "allow",
+    check("benign + Chinese path", "echo hook-probe", PASS_DECISION,
           conversation="s2-a", cwd="c:\\Users\\%s\\Desktop\\test\\gemini" % CN)
     check("DANGEROUS + Chinese path", "Remove-Item C:\\Users\\%s\\temp\\x -Recurse -Force" % CN,
           "deny", conversation="s2-b", cwd="c:\\Users\\%s\\Desktop\\test\\gemini" % CN)
 
     print()
     print("=" * 78)
-    print("SECTION 3  proxy / network protection (rules lines 105-114)")
+    print("SECTION 3  proxy / network protection")
     print("=" * 78)
     proxy_deny_cases = [
         ("kill proxy (taskkill mihomo)", "taskkill /F /IM mihomo.exe"),
@@ -163,22 +162,45 @@ def main():
     for idx, (label, cmd) in enumerate(proxy_deny_cases):
         check(label, cmd, "deny", conversation="s3-deny-%d" % idx)
 
-    proxy_allow_cases = [
+    proxy_pass_cases = [
         ("read-only proxy process check", "Get-Process clash,mihomo,sing-box -ErrorAction SilentlyContinue"),
         ("read-only proxy registry query", r'reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyEnable'),
         ("read-only HTTP HEAD probe", "curl.exe -I -s -m 5 https://example.com"),
     ]
-    for idx, (label, cmd) in enumerate(proxy_allow_cases):
-        check(label, cmd, "allow", conversation="s3-allow-%d" % idx)
+    for idx, (label, cmd) in enumerate(proxy_pass_cases):
+        check(label, cmd, PASS_DECISION, conversation="s3-pass-%d" % idx)
 
     print()
     print("=" * 78)
-    print("SECTION 4  stateless benign command repetition (decoupled to read_loop_guard)")
+    print("SECTION 4  edge cases: git -C, refspec +, find -delete, quote masking")
     print("=" * 78)
-    for i in (1, 2, 3):
-        check("repeat benign build #%d" % i, "npm run build", "allow", conversation="s4")
-    for i in (1, 2, 3):
-        check("repeat read-only ls #%d" % i, "ls -la", "allow", conversation="s4")
+    edge_deny_cases = [
+        ("git -C repo reset --hard", "git -C repo reset --hard"),
+        ("git checkout -- .", "git checkout -- ."),
+        ("git -C repo checkout -- .", "git -C repo checkout -- ."),
+        ("git restore .", "git restore ."),
+        ("git -C repo restore .", "git -C repo restore ."),
+        ("rm -r build (without -f)", "rm -r build"),
+        ("find -delete", "find . -name '*.tmp' -delete"),
+        ("git push origin +main", "git push origin +main"),
+        ("bash -c wrapped rm -rf", 'bash -lc "rm -rf /tmp/x"'),
+        ("python -c shutil.rmtree", 'python -c "import shutil; shutil.rmtree(\'build\')"'),
+        ("node -e fs.rmSync", 'node -e "fs.rmSync(\'build\', {recursive:true})"'),
+        ("grep followed by && rm -rf", 'grep -rn "rm -rf" scripts/ && rm -rf build --token sk-secret1234567890'),
+    ]
+    for idx, (label, cmd) in enumerate(edge_deny_cases):
+        check(label, cmd, "deny", conversation="s4-deny-%d" % idx)
+
+    edge_pass_cases = [
+        ("grep -rn 'rm -rf' scripts/", 'grep -rn "rm -rf" scripts/'),
+        ("git commit -m with rm -rf", 'git commit -m "fix rm -rf and git reset --hard regex"'),
+        ("git push --force-with-lease", "git push --force-with-lease origin main"),
+        ("git restore --staged . (safe unstage)", "git restore --staged ."),
+        ("repeat benign build #1", "npm run build"),
+        ("repeat read-only ls #1", "ls -la"),
+    ]
+    for idx, (label, cmd) in enumerate(edge_pass_cases):
+        check(label, cmd, PASS_DECISION, conversation="s4-pass-%d" % idx)
 
     if GUARD == "node":
         print()
@@ -188,6 +210,7 @@ def main():
         unix_deny_cases = [
             ("rm -Rf (uppercase R)", "rm -Rf ~/Projects/tmp"),
             ("sudo rm -rf", "sudo rm -rf /usr/local/foo"),
+            ("rm -r build/tmp", "rm -r build/tmp"),
             ("diskutil eraseDisk", "diskutil eraseDisk APFS Blank /dev/disk4"),
             ("diskutil apfs deleteVolume", "diskutil apfs deleteVolume disk3s5"),
             ("dd to raw device", "sudo dd if=/dev/zero of=/dev/rdisk4 bs=1m"),
@@ -217,7 +240,7 @@ def main():
         for idx, (label, cmd) in enumerate(unix_deny_cases):
             check(label, cmd, "deny", conversation="s5-deny-%d" % idx)
 
-        unix_allow_cases = [
+        unix_pass_cases = [
             ("read-only networksetup get", "networksetup -getwebproxy Wi-Fi"),
             ("read-only networksetup list", "networksetup -listallnetworkservices"),
             ("read-only scutil --proxy", "scutil --proxy"),
@@ -227,11 +250,10 @@ def main():
             ("read-only route get", "route -n get default"),
             ("read-only diskutil list", "diskutil list"),
             ("rm single file", "rm build/output.log"),
-            ("rm -r without force", "rm -r build/tmp"),
             ("brew install", "brew install jq"),
         ]
-        for idx, (label, cmd) in enumerate(unix_allow_cases):
-            check(label, cmd, "allow", conversation="s5-allow-%d" % idx)
+        for idx, (label, cmd) in enumerate(unix_pass_cases):
+            check(label, cmd, PASS_DECISION, conversation="s5-pass-%d" % idx)
 
     print()
     print("=" * 78)
@@ -242,7 +264,7 @@ def main():
             print("  FAILED %s: expected %s got %s  [%s]" % (label, exp, got, cmd))
     print("=" * 78)
 
-    # Any fail-open during this run is itself a failure signal.
+    # Verify audit log behavior: zero ERROR-FAILOPEN, zero ASK/ALLOW plaintext entries, and secret redaction
     if os.path.isfile(LOG):
         with open(LOG, "rb") as fh:
             data = fh.read().decode("utf-8", errors="replace")
@@ -253,6 +275,13 @@ def main():
                 if "ERROR-FAILOPEN" in ln:
                     print("   ", ln[:300])
             sys.exit(1)
+        if "sk-secret1234567890" in data:
+            print("FATAL: plaintext secret leaked into hook_log.jsonl!")
+            sys.exit(1)
+        if '"verdict":"ASK"' in data or '"verdict":"ALLOW"' in data:
+            print("FATAL: non-blocked commands should not be logged by default!")
+            sys.exit(1)
+        print("Audit log privacy & secret redaction check: PASS")
 
     sys.exit(1 if failed else 0)
 

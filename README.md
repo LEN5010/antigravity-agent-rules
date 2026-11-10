@@ -13,7 +13,7 @@
 > 1. **支持 Windows、macOS 与 Linux 全平台一键部署**：Windows 使用 [`install.ps1`](./install.ps1)（兼容 PowerShell 5.1 / `pwsh` 7，挂载 `pretool_guard.ps1`），macOS / Linux 使用 [`./install.sh`](./install.sh)（基于 Node.js >= 18，挂载跨平台 `pretool_guard.cjs`）。两端均默认执行 **5 层全量安装**，也都支持 `-HookOnly` / `--hook-only` 仅装 Hook 层。
 > 2. **正则黑名单是安全网，不是沙箱，可以被绕过**。它用来拦住 Agent 常见的危险误操作，防不住换写法绕过或刻意构造的命令。
 > 3. **Hook 默认放行边界（Ask-First 模式慎用）**：`pretool_guard.ps1` / `pretool_guard.cjs` 适配 Antigravity 的 `autoExecutionPolicy = EAGER (Turbo)` 模式，**未命中高危黑名单的命令将由 Hook 返回 `{"decision":"allow"}` 放行**，请用户根据自身安全需求开启；如果你开的是每次手动审批（Ask-First），请勿直接原样启用该默认 `allow` 分支。
-> 4. 不要把本仓库所有 `.md` 文件拼接塞进同一个系统提示词（System Prompt / `GEMINI.md`）全量常驻。大模型有效注意力有限，全设为 `always_on` 不但白占数万 Token 推理空间，日常聊句简单问答也会触发繁琐的工程仪式并冲淡安全红线。正确用法是只让 `global/` 下约 90 行核心规则常驻，高危命令交给 `hooks/` 在进程级拦截（0 Token 开销），其余 `rules/`、`tone/` 和 `skills/` 由模型按场景触发读取。
+> 4. 不要把本仓库所有 `.md` 文件拼接塞进同一个系统提示词（System Prompt / `GEMINI.md`）全量常驻。大模型有效注意力有限，全设为 `always_on` 不但白占数万 Token 推理空间，日常聊句简单问答也会触发繁琐的工程仪式并冲淡安全红线。正确用法是只让 `global/` 下约 100 行核心规则常驻，高危命令交给 `hooks/` 在进程级拦截（0 Token 开销），其余 `rules/`、`tone/` 和 `skills/` 由模型按场景触发读取。
 
 ---
 
@@ -130,14 +130,14 @@ python verify-hook.py --guard node                            # Windows 上测 N
 
 ```mermaid
 flowchart TD
-    A["工具调用前/后: hooks/ 硬拦截层<br/>(pretool_guard.ps1 / pretool_guard.cjs / read_loop_guard.cjs)"] --> B["常驻底座: global/ Always-on 全局规则<br/>(GEMINI.md + AGENTS.md, ~90 行)"]
+    A["工具调用前/后: hooks/ 硬拦截层<br/>(pretool_guard.ps1 / pretool_guard.cjs / read_loop_guard.cjs)"] --> B["常驻底座: global/ Always-on 全局规则<br/>(GEMINI.md + AGENTS.md + THINKING-VISIBILITY.md, ~100 行)"]
     B --> C["按需条件规则: rules/ (trigger: model_decision)<br/>(后台资源 / 诊断转施工 / 长任务 / 打包 / Windows / 检索路由)"]
     B --> D["按需执行协议: skills/ & agents/<br/>(task-intake / research-routing / 网络诊断 / 多代理编排 / 维护 / 交付)"]
     B --> E["按需文风层: tone/<br/>(lieflat-less-ai-tone / humanizer-zh)"]
 ```
 
 - `hooks/`（硬拦截层）：在工具调用前后由宿主直接调用，不占模型上下文 Token。`pretool_guard.ps1`（Windows）与 `pretool_guard.cjs`（macOS / Linux）在进程级拦住强删、丢代码和杀代理断网命令，`read_loop_guard.cjs` 在 `observe` 模式下记录重复读同一文件区间的死循环。
-- `global/`（Always-on 常驻底座）：只有 `GEMINI.md` 和 `AGENTS.md` 两个文件常驻，共约 90 行。规定防开盒与路径脱敏、代理只读红线、按平台分流的 Shell 偏好（Windows 用 Git Bash / `pwsh` 7，macOS / Linux 用原生 `zsh` / `bash`）、动作分级、`FAST_PATH` / `INVESTIGATION_PATH` 切换、证据分级（`VERIFIED` / `NOT_PROVEN` / `HYPOTHESIS`）以及专项规则路由。
+- `global/`（Always-on 常驻底座）：只有 `GEMINI.md`、`AGENTS.md` 和 `THINKING-VISIBILITY.md` 三个文件常驻，共约 100 行。规定防开盒与路径脱敏、代理只读红线、按平台分流的 Shell 偏好（Windows 用 Git Bash / `pwsh` 7，macOS / Linux 用原生 `zsh` / `bash`）、工具调用前显式说明排查脉络、动作分级、`FAST_PATH` / `INVESTIGATION_PATH` 切换、证据分级（`VERIFIED` / `NOT_PROVEN` / `HYPOTHESIS`）以及专项规则路由。
 - `rules/`（按需条件规则层）：带 `trigger: model_decision`，平时只向模型暴露一行触发条件描述。仅在涉及后台进程与 GUI 脱钩、诊断转施工判断、8 分钟长任务阶段汇报、打包发布、Windows 脚本编码或外部联网检索时按需加载。
 - `skills/` 与 `agents/`（按需执行协议与子代理层）：存放多步骤工程状态机与四态回报（`task-intake`）、多源检索（`research-routing`）、只读网络排查（`safe-network-diagnostics`）、多代理编排（`multi-agent-orchestrator`）、客户端缓存归档（`client-maintenance`）、Word 转换校验（`docx-delivery`）和小说创作（`chinese-novelist`）等标准作业程序，同时提供运行在 Gemini Flash 上的全局只读验证子代理 `flash-verifier.md` 来隔离长日志与哈希扫描脏活。
 - `tone/`（按需文风层）：包含 `lieflat-less-ai-tone`（基于 283 万字语料统计的 11 条去 AI 味规范）和 `humanizer-zh`（去除空话、重复与模板腔）。平时问答与写代码不加载，只在创作或润色中文文章及用户点名去 AI 味时读取。
@@ -147,7 +147,7 @@ flowchart TD
 ## 完整文件总表与手动部署步骤
 
 <details>
-<summary>点击展开：完整文件总表（28 项文件/模块与触发矩阵）</summary>
+<summary>点击展开：完整文件总表（29 项文件/模块与触发矩阵）</summary>
 
 | 仓库内路径 | 原始部署路径（脱敏） | 所属层级 | 触发方式 | 一句话作用 |
 | :--- | :--- | :--- | :--- | :--- |
@@ -162,6 +162,7 @@ flowchart TD
 | [`hooks/scripts/verify-hook.py`](./hooks/scripts/verify-hook.py) + [`test-cases.txt`](./hooks/scripts/test-cases.txt) | `~/.gemini/config/scripts/` | 硬拦截 Hook (`hooks/`) | 手动或安装时自动执行 | 用含中文路径的真实 UTF-8 载荷对 `pretool_guard.ps1`（40 项）与 `pretool_guard.cjs`（78 项，含 38 项 macOS / Linux 专属用例）做全量回归校验，确保拦截准确且 `ERROR-FAILOPEN` 为 `0`。 |
 | [`global/GEMINI.md`](./global/GEMINI.md) | `~/.gemini/GEMINI.md` | Always-on 全局规则 (`global/`) | `always_on`（所有会话自动注入） | 定义人机协作态度、防开盒与路径脱敏铁律、跨平台用户代理与网络配置严格只读红线、按平台分流的 Shell 偏好（Windows: Git Bash/`pwsh` 7；macOS/Linux: 原生 `zsh`/`bash`）、子代理派工原则与可选共享待办入口。 |
 | [`global/AGENTS.md`](./global/AGENTS.md)（含 [`plugin.json`](./global/plugin.json)） | `~/.gemini/config/plugins/anyi-global-rules/rules/AGENTS.md` | Always-on 全局规则 (`global/`) | `trigger: always_on` | 全局工程主规则（§1–§15）：规定动作分级、`FAST_PATH`/`INVESTIGATION_PATH` 轮次纪律、禁仪式化严谨、停止与资源边界、交付契约、证据真实性、数据保护、范围锁定及按需专项路由。 |
+| [`global/THINKING-VISIBILITY.md`](./global/THINKING-VISIBILITY.md) | `~/.gemini/config/plugins/anyi-global-rules/rules/THINKING-VISIBILITY.md` | Always-on 全局规则 (`global/`) | `trigger: always_on` | 要求每次发起工具调用或连续多步操作前，先用 1–2 句简练文字说明分析判断、调用原因与预期验证点，不要静默连续调用工具（亦可单独放入 `~/.gemini/antigravity/rules/` 或工作区 `.agents/rules/` 独立使用）。 |
 | [`tone/lieflat-less-ai-tone/`](./tone/lieflat-less-ai-tone/skills/lieflat-less-ai-tone/SKILL.md) | `~/.gemini/config/plugins/lieflat-less-ai-tone/` | 文风层 (`tone/`) | 按需加载（创作或润色中文文章/文案/故事、或明确要求去 AI 味时；普通问答不加载） | 基于 283 万字语料统计的 11 条去 AI 味写作规范（与全局规则衔接版），清除宏大拔高、三连排比、翻译腔与连接词泛滥，严守事实与结构守恒（上游完整仓库见 [`UPSTREAM.md`](./tone/lieflat-less-ai-tone/UPSTREAM.md)）。 |
 | [`tone/humanizer-zh/`](./tone/humanizer-zh/skills/humanizer-zh/SKILL.md) | `~/.gemini/config/plugins/humanizer-zh/` | 文风层 (`tone/`) | 按需加载（编辑或审阅已有中文文章/评论/文档、去除空话与模板化表达时） | 消除已有中文文本的空话、重复与模板腔，严格保留原文事实、确定程度与作者声音（上游仓库见 [`UPSTREAM.md`](./tone/humanizer-zh/UPSTREAM.md)）。 |
 | [`rules/BACKGROUND-RESOURCES.md`](./rules/BACKGROUND-RESOURCES.md) | `~/.gemini/config/plugins/anyi-global-rules/rules/BACKGROUND-RESOURCES.md` | 按需 model-decision 规则 (`rules/`) | `trigger: model_decision`（创建/管理临时子代理、后台任务、测试服、子进程或拉起桌面 GUI 前） | 规定“谁创建谁负责生命周期”、创建记身份、探针用完即杀、桌面 GUI 脱钩启动，禁止按进程名盲杀用户原有服务。 |
@@ -208,6 +209,7 @@ flowchart TD
   - `global/GEMINI.md` → 复制到 `~/.gemini/GEMINI.md`
   - `global/plugin.json` → 复制到 `~/.gemini/config/plugins/anyi-global-rules/plugin.json`
   - `global/AGENTS.md` → 复制到 `~/.gemini/config/plugins/anyi-global-rules/rules/AGENTS.md`
+  - `global/THINKING-VISIBILITY.md` → 复制到 `~/.gemini/config/plugins/anyi-global-rules/rules/THINKING-VISIBILITY.md`（若只想单装这一条，也可直接放到 `~/.gemini/antigravity/rules/` 或工作区 `.agents/rules/`）
 - 启用方式：
   - `~/.gemini/GEMINI.md` 会被 Antigravity / Gemini 自动作为全局最高优 `user_global` 规则注入。
   - 在 `~/.gemini/config/config.json` 的 `"plugins"` 字段下启用插件：

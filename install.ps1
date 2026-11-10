@@ -296,6 +296,9 @@ Copy-WithPlaceholderReplacement `
 Copy-WithPlaceholderReplacement `
     -SrcFile (Join-Path $RepoRoot 'global\AGENTS.md') `
     -DstFile (Join-Path $AnyiPluginDir 'rules\AGENTS.md')
+Copy-WithPlaceholderReplacement `
+    -SrcFile (Join-Path $RepoRoot 'global\THINKING-VISIBILITY.md') `
+    -DstFile (Join-Path $AnyiPluginDir 'rules\THINKING-VISIBILITY.md')
 
 $AnyiRuleFiles = @(
     'BACKGROUND-RESOURCES.md',

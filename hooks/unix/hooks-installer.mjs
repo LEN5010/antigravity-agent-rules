@@ -345,6 +345,12 @@ async function install(opts) {
       forwardHome,
       forwardWs,
     );
+    copyWithPlaceholderReplacement(
+      path.join(REPO_ROOT, 'global', 'THINKING-VISIBILITY.md'),
+      path.join(anyiPluginDir, 'rules', 'THINKING-VISIBILITY.md'),
+      forwardHome,
+      forwardWs,
+    );
     for (const rf of ANYI_RULE_FILES) {
       copyWithPlaceholderReplacement(
         path.join(REPO_ROOT, 'rules', rf),
